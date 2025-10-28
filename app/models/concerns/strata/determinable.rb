@@ -2,21 +2,24 @@
 
 module Strata
   # Determinable concern provides determination recording capability to any model.
-  # Include this module to add a has_many :determinations association and the
-  # record_determination! convenience method.
+  # By default, this is included in Strata::ApplicationForm.
+  # Include this module in other models to add a has_many :determinations association
+  # and the record_determination! convenience method.
   #
-  # @example Including Determinable in a model
-  #   class MyCertificationCase < Strata::Case
-  #     include Strata::Determinable
-  #   end
-  #
-  # @example Recording a determination
-  #   case.record_determination!(
+  # @example Using determinations on an ApplicationForm
+  #   my_form = MyApplicationForm.new
+  #   my_form.record_determination!(
   #     decision_method: :automated,
   #     reason: "pregnant_member",
   #     outcome: :automated_exemption,
+  #     determined_at: Date.today,
   #     determination_data: ruleset.output_data.reasons
   #   )
+  #
+  # @example Including Determinable in another model
+  #   class MyCustomModel < ApplicationRecord
+  #     include Strata::Determinable
+  #   end
   module Determinable
     extend ActiveSupport::Concern
 
