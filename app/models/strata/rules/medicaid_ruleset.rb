@@ -9,6 +9,9 @@ module Strata
         age_over_65 && modified_adjusted_gross_income < 50000
       end
 
+      # evaluated_on represents a date in the past, present, or future.
+      # date_of_birth represents a date in the past.
+      # The result should be deterministic and return the same result for the same input.
       def age(date_of_birth, evaluated_on)
         return nil if date_of_birth.nil? || evaluated_on.nil?
         return nil if date_of_birth > evaluated_on
