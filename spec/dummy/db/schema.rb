@@ -55,6 +55,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_28_072830) do
     t.uuid "determined_by_id"
     t.datetime "determined_at", null: false
     t.datetime "created_at", null: false
+    t.index ["created_at"], name: "index_strata_determinations_on_created_at"
+    t.index ["determined_at"], name: "index_strata_determinations_on_determined_at"
+    t.index ["determined_by_id"], name: "index_strata_determinations_on_determined_by_id"
     t.index ["subject_id", "subject_type"], name: "index_strata_determinations_on_polymorphic_subject"
   end
 

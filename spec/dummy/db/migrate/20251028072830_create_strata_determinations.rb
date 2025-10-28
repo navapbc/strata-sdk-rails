@@ -24,5 +24,9 @@ class CreateStrataDeterminations < ActiveRecord::Migration[8.0]
 
     add_index :strata_determinations, [ :subject_id, :subject_type ],
               name: 'index_strata_determinations_on_polymorphic_subject'
+
+    add_index :strata_determinations, :determined_by_id
+    add_index :strata_determinations, :determined_at
+    add_index :strata_determinations, :created_at
   end
 end
