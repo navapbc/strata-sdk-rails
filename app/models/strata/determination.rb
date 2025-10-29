@@ -54,8 +54,14 @@ module Strata
       methods = Array(method_or_methods).map(&:to_s)
       where(decision_method: methods)
     }
-    scope :with_reason, ->(reason_or_reasons) { where(reason: Array(reason_or_reasons)) }
-    scope :with_outcome, ->(outcome_or_outcomes) { where(outcome: Array(outcome_or_outcomes)) }
+    scope :with_reason, lambda { |reason_or_reasons|
+      reasons = Array(reason_or_reasons).map(&:to_s)
+      where(reason: reasons)
+    }
+    scope :with_outcome, lambda { |outcome_or_outcomes|
+      outcomes = Array(outcome_or_outcomes).map(&:to_s)
+      where(outcome: outcomes)
+    }
 
     # User determination scope
     scope :determined_by, ->(user_id) { where(determined_by_id: user_id) }

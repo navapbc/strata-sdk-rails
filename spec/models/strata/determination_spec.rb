@@ -65,13 +65,6 @@ RSpec.describe Strata::Determination do
     end
 
     describe 'for_subject' do
-      # before do
-      #   determination_form_1_auto.save!
-      #   determination_form_1_review.save!
-      #   determination_form_2_attest.save!
-      #   determination_passport_auto.save!
-      # end
-
       it 'returns only determinations for the given subject' do
         results = described_class.for_subject(test_form_alpha)
         expect(results).to contain_exactly(determination_form_1_auto, determination_form_1_review)
@@ -90,13 +83,6 @@ RSpec.describe Strata::Determination do
     end
 
     describe 'for_subjects' do
-      # before do
-      #   determination_form_1_auto.save!
-      #   determination_form_1_review.save!
-      #   determination_form_2_attest.save!
-      #   determination_passport_auto.save!
-      # end
-
       it 'returns determinations for all given subjects' do
         results = described_class.for_subjects([ test_form_alpha, test_form_bravo ])
         expect(results).to contain_exactly(determination_form_1_auto, determination_form_1_review, determination_form_2_attest)
@@ -114,13 +100,6 @@ RSpec.describe Strata::Determination do
     end
 
     describe 'for_subject_type' do
-      # before do
-      #   determination_form_1_auto
-      #   determination_form_1_review
-      #   determination_form_2_attest
-      #   determination_passport_auto
-      # end
-
       it 'filters by class object' do
         results = described_class.for_subject_type(TestApplicationForm)
         expect(results.count).to eq(3)
@@ -144,13 +123,6 @@ RSpec.describe Strata::Determination do
     end
 
     describe 'for_subject_id' do
-      # before do
-      #   determination_form_1_auto
-      #   determination_form_1_review
-      #   determination_form_2_attest
-      #   determination_passport_auto
-      # end
-
       it 'filters by subject_id alone' do
         results = described_class.for_subject_id(test_form_alpha.id)
         expect(results).to contain_exactly(determination_form_1_auto, determination_form_1_review)
@@ -215,6 +187,11 @@ RSpec.describe Strata::Determination do
         results = described_class.with_reason('nonexistent_reason')
         expect(results).to be_empty
       end
+
+      it 'filters by symbol' do
+        results = described_class.with_reason(:age_under_19)
+        expect(results).to contain_exactly(determination_form_1_auto)
+      end
     end
 
     describe 'with_outcome' do
@@ -231,6 +208,11 @@ RSpec.describe Strata::Determination do
       it 'returns empty when no determinations match' do
         results = described_class.with_outcome('nonexistent_outcome')
         expect(results).to be_empty
+      end
+
+      it 'filters by symbol' do
+        results = described_class.with_outcome(:automated_exemption)
+        expect(results).to contain_exactly(determination_form_1_auto, determination_passport_auto)
       end
     end
 

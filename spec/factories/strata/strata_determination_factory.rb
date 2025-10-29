@@ -2,7 +2,7 @@
 
 FactoryBot.define do
   factory :strata_determination, class: 'Strata::Determination' do
-    association :subject, factory: :test_case
+    association :subject, factory: :test_application_form
     decision_method { :automated }
     reason { "age_under_19" }
     outcome { :automated_exemption }
