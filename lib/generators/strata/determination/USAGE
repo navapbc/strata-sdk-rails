@@ -1,0 +1,36 @@
+Description:
+    Generates a Determination model, Determinable concern, migration, and spec for your host application.
+    These files inherit from Strata::Determination and Strata::Determinable respectively, providing
+    determination recording capabilities with extension points for your domain.
+
+Usage:
+    bin/rails generate strata:determination
+
+This will create:
+    - db/migrate/<timestamp>_create_strata_determinations.rb
+    - app/models/determination.rb
+    - app/models/concerns/determinable.rb
+    - spec/models/determination_spec.rb
+    - spec/models/concerns/determinable_spec.rb
+
+Options:
+    --skip-migration-check         Skip checking if strata_determinations table exists
+
+About Determinations:
+    Determinations record decisions or outcomes for aggregate roots (e.g., ApplicationForms).
+    Include the Determinable concern in your models to enable determination recording:
+
+        class MyApplicationForm < ApplicationRecord
+          include Determinable
+        end
+
+    Then record determinations:
+
+        form.record_determination!(
+          decision_method: :automated,
+          reason: "pregnant_member",
+          outcome: :automated_exemption,
+          determination_data: rules_engine_output,
+          determined_at: Time.current,
+          determined_by_id: user_id  # optional for automated
+        )
