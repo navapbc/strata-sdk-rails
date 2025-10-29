@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-class CreateStrataDeterminations < ActiveRecord::Migration[7.0]
+class CreateStrataDeterminations < ActiveRecord::Migration[8.0]
   def change
     create_table :strata_determinations, id: :uuid, default: -> { "gen_random_uuid()" } do |t|
       # Polymorphic association to the subject (aggregate root) being determined

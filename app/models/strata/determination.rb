@@ -22,7 +22,7 @@ module Strata
   #     decision_method: :staff_review,
   #     reason: "requirements_verification",
   #     outcome: :requirements_met,
-  #     determination_data: RulesEngine.new.evaluate(:requirements_verification).reasons
+  #     determination_data: RulesEngine.new.evaluate(:requirements_verification).reasons,
   #     determined_by_id: staff_uuid
   #   )
   class Determination < ApplicationRecord
