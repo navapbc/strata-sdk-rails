@@ -52,8 +52,6 @@ es-US:
         end_label: "Fecha de fin"
         start_hint: "Ingrese la fecha de inicio"
         end_hint: "Ingrese la fecha de finalización"
-      money_field:
-        hint: "Por ejemplo, 1500.00"
     tasks:
       actions:
         pick_next: "Tomar siguiente tarea"

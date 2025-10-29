@@ -583,14 +583,6 @@ RSpec.describe Strata::FormBuilder do
       end
     end
 
-    context 'with custom width' do
-      let(:result) { builder.money_field(:weekly_wage, width: 'md') }
-
-      it 'applies the width class to the input' do
-        expect(result).to have_element(:input, class: /usa-input--md/)
-      end
-    end
-
     context 'with custom class' do
       let(:result) { builder.money_field(:weekly_wage, class: 'custom-class') }
 

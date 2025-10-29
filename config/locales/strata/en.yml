@@ -55,8 +55,6 @@ en:
         end_label: "End date"
         start_hint: "Enter the start date"
         end_hint: "Enter the end date"
-      money_field:
-        hint: "For example, 1500.00"
     staff:
       header:
         tasks: "Tasks"
