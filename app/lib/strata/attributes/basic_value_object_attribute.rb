@@ -55,6 +55,11 @@ module Strata
               nested_attribute_types.keys.each do |nested_attribute_name|
                 send("#{name}_#{nested_attribute_name}=", value[nested_attribute_name.to_sym] || value[nested_attribute_name.to_s])
               end
+            # TODO: pass along _a_ value so we know there was some value that was attempted to be used
+            else
+              nested_attribute_types.keys.each do |nested_attribute_name|
+                send("#{name}_#{nested_attribute_name}=", :invalid_value)
+              end
             end
           end
 
