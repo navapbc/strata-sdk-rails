@@ -492,12 +492,34 @@ module Strata
     #
     # @param [Symbol] attribute The attribute name
     # @param [Hash] options Options for the money field
+    # @option options [String] :label Custom label text
+    # @option options [String] :hint Custom hint text
+    # @option options [String] :class Custom CSS classes
+    # @option options [String] :placeholder Placeholder text
     # @option options [String] :inputmode Input mode (defaults to 'decimal')
     # @return [String] The rendered HTML for the money input
     def money_field(attribute, options = {})
-      options[:inputmode] ||= "decimal"
-      fields_for(attribute) do |money_fields|
-        money_fields.text_field("dollar_amount", options)
+      label_text = options.delete(:label) || human_name(attribute)
+      hint_text = options.delete(:hint)
+
+      # Get the existing Money object value if present
+      object_value = object&.send(attribute)
+      dollar_value = object_value&.dollar_amount
+
+      # Build input options from remaining options
+      input_options = options.except(:group_options)
+      input_options[:inputmode] ||= "decimal"
+      input_options[:value] = dollar_value unless input_options.key?(:value)
+      input_options[:"aria-describedby"] = hint_id(attribute) if hint_text
+
+      # Add error styling if there are validation errors
+      append_to_option(input_options, :class, " usa-input--error") if has_error?(attribute)
+
+      form_group(attribute, options[:group_options] || {}) do
+        us_text_field_label(attribute, label_text, { hint: hint_text }) +
+        fields_for(attribute) do |money_fields|
+          money_fields.text_field("dollar_amount", input_options.merge(skip_form_group: true))
+        end
       end
     end
 
