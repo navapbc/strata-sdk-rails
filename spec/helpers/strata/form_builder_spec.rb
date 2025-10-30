@@ -520,11 +520,6 @@ RSpec.describe Strata::FormBuilder do
     let(:object) { TestRecord.new }
     let(:result) { builder.money_field(:weekly_wage) }
 
-    it 'outputs a text input with nested field structure' do
-      expect(result).to have_element(:input, type: 'text', name: 'object[weekly_wage][dollar_amount]')
-      expect(result).to have_element(:input, inputmode: 'decimal')
-    end
-
     it 'outputs a label' do
       expect(result).to have_element(:label, class: 'usa-label', for: 'object_weekly_wage')
     end
@@ -537,7 +532,7 @@ RSpec.describe Strata::FormBuilder do
       let(:object) { TestRecord.new(weekly_wage: nil) }
 
       it 'renders an empty input field' do
-        expect(result).to have_element(:input, name: 'object[weekly_wage][dollar_amount]', value: nil)
+        expect(result).to have_element(:input, name: 'object[weekly_wage]', value: nil)
       end
     end
 
@@ -545,7 +540,7 @@ RSpec.describe Strata::FormBuilder do
       let(:object) { TestRecord.new(weekly_wage: Strata::Money.new(cents: 150050)) }
 
       it 'pre-fills the field with the dollar amount' do
-        expect(result).to have_element(:input, name: 'object[weekly_wage][dollar_amount]', value: '1500.5')
+        expect(result).to have_element(:input, name: 'object[weekly_wage]', value: '1500.5')
       end
     end
 

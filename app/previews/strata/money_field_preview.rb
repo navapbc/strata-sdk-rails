@@ -28,7 +28,7 @@ module Strata
     def invalid
       model = TestRecord.new
       model.weekly_wage = Strata::Money.new(cents: -100)
-      model.errors.add(:weekly_wage, "must be a positive number")
+      model.errors.add(:weekly_wage, :greater_than, value: 0, count: 0)
       render template: "strata/previews/_money_field", locals: { model: model }
     end
   end
