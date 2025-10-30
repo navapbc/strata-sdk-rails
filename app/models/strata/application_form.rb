@@ -22,6 +22,7 @@ module Strata
     self.abstract_class = true
 
     include Strata::Attributes
+    include Strata::Determinable
 
     define_model_callbacks :submit, only: [ :before, :after ]
 

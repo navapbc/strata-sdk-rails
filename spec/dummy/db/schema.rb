@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_03_010306) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_28_072830) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -43,6 +43,22 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_03_010306) do
     t.string "application_form_id"
     t.jsonb "facts"
     t.index ["application_form_id"], name: "index_passport_cases_on_application_form_id"
+  end
+
+  create_table "strata_determinations", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "subject_id", null: false
+    t.string "subject_type", null: false
+    t.string "decision_method", null: false
+    t.string "reason", null: false
+    t.string "outcome", null: false
+    t.jsonb "determination_data", default: {}, null: false
+    t.uuid "determined_by_id"
+    t.datetime "determined_at", null: false
+    t.datetime "created_at", null: false
+    t.index ["created_at"], name: "index_strata_determinations_on_created_at"
+    t.index ["determined_at"], name: "index_strata_determinations_on_determined_at"
+    t.index ["determined_by_id"], name: "index_strata_determinations_on_determined_by_id"
+    t.index ["subject_id", "subject_type"], name: "index_strata_determinations_on_polymorphic_subject"
   end
 
   create_table "strata_tasks", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
