@@ -488,6 +488,31 @@ module Strata
       end
     end
 
+    # Renders a money input field for dollar amounts.
+    #
+    # @param [Symbol] attribute The attribute name
+    # @param [Hash] options Options for the money field
+    # @option options [String] :label Custom label text
+    # @option options [String] :hint Custom hint text
+    # @option options [String] :class Custom CSS classes
+    # @option options [String] :placeholder Placeholder text
+    # @option options [String] :inputmode Input mode (defaults to 'decimal')
+    # @return [String] The rendered HTML for the money input
+    def money_field(attribute, options = {})
+      # Get the existing Money object value if present
+      object_value = object&.send(attribute)
+      dollar_value = object_value&.dollar_amount
+
+      # Build input options from remaining options
+      input_options = options.except(:group_options)
+      input_options[:inputmode] ||= "decimal"
+      input_options[:value] = dollar_value unless input_options.key?(:value)
+
+      form_group(attribute, options[:group_options] || {}) do
+        text_field(attribute, input_options.merge(skip_form_group: true))
+      end
+    end
+
     def us_states_and_territories
       [
         [ "", "" ],

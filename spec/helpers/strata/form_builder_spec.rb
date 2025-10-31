@@ -515,4 +515,99 @@ RSpec.describe Strata::FormBuilder do
       end
     end
   end
+
+  describe '#money_field' do
+    let(:object) { TestRecord.new }
+    let(:result) { builder.money_field(:weekly_wage) }
+
+    it 'outputs a label' do
+      expect(result).to have_element(:label, class: 'usa-label', for: 'object_weekly_wage')
+    end
+
+    it 'wraps the input in a form group' do
+      expect(result).to have_element(:div, class: 'usa-form-group')
+    end
+
+    context 'with no value' do
+      let(:object) { TestRecord.new(weekly_wage: nil) }
+
+      it 'renders an empty input field' do
+        expect(result).to have_element(:input, name: 'object[weekly_wage]', value: nil)
+      end
+    end
+
+    context 'with an existing Money value' do
+      let(:object) { TestRecord.new(weekly_wage: Strata::Money.new(cents: 150050)) }
+
+      it 'pre-fills the field with the dollar amount' do
+        expect(result).to have_element(:input, name: 'object[weekly_wage]', value: '1500.5')
+      end
+    end
+
+    context 'with validation errors' do
+      before do
+        object.errors.add(:weekly_wage, 'must be a positive number')
+      end
+
+      it 'displays the error message' do
+        expect(result).to have_element(:span, text: 'Weekly wage must be a positive number', class: 'usa-error-message')
+      end
+
+      it 'adds error styling to the form group' do
+        expect(result).to have_element(:div, class: 'usa-form-group--error')
+      end
+
+      it 'adds error styling to the input' do
+        expect(result).to have_element(:input, class: /usa-input--error/)
+      end
+    end
+
+    context 'with custom label' do
+      let(:result) { builder.money_field(:weekly_wage, label: 'Custom Amount') }
+
+      it 'displays the custom label' do
+        expect(result).to have_element(:label, text: 'Custom Amount')
+      end
+    end
+
+    context 'with custom hint' do
+      let(:result) { builder.money_field(:weekly_wage, hint: 'Enter the amount in dollars') }
+
+      it 'displays the custom hint' do
+        expect(result).to have_element(:div, text: 'Enter the amount in dollars', class: 'usa-hint')
+      end
+    end
+
+    context 'with custom class' do
+      let(:result) { builder.money_field(:weekly_wage, class: 'custom-class') }
+
+      it 'adds the custom class to the input' do
+        expect(result).to have_element(:input, class: /custom-class/)
+      end
+    end
+
+    context 'with custom placeholder' do
+      let(:result) { builder.money_field(:weekly_wage, placeholder: '0.00') }
+
+      it 'adds the placeholder to the input' do
+        expect(result).to have_element(:input, placeholder: '0.00')
+      end
+    end
+
+    context 'with custom inputmode' do
+      let(:result) { builder.money_field(:weekly_wage, inputmode: 'numeric') }
+
+      it 'uses the custom inputmode' do
+        expect(result).to have_element(:input, inputmode: 'numeric')
+      end
+    end
+
+    context 'with additional HTML options' do
+      let(:result) { builder.money_field(:weekly_wage, data: { test: 'value' }, aria: { label: 'Amount' }) }
+
+      it 'passes through HTML options to the input' do
+        expect(result).to have_element(:input, 'data-test': 'value', 'aria-label': 'Amount')
+      end
+    end
+  end
 end
