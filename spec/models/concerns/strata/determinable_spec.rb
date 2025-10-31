@@ -25,7 +25,7 @@ RSpec.describe Strata::Determinable do
         expect {
           test_form.record_determination!(
             decision_method: :automated,
-            reason: "pregnant_member",
+            reasons: [ "pregnant_member" ],
             outcome: :automated_exemption,
             determined_at: determined_at,
             determination_data: data
@@ -34,7 +34,7 @@ RSpec.describe Strata::Determinable do
 
         determination = test_form.determinations.first
         expect(determination.decision_method).to eq('automated')
-        expect(determination.reason).to eq('pregnant_member')
+        expect(determination.reasons).to eq([ "pregnant_member" ])
         expect(determination.outcome).to eq('automated_exemption')
         expect(determination.determination_data).to eq(data)
         expect(determination.determined_by_id).to be_nil
@@ -46,7 +46,7 @@ RSpec.describe Strata::Determinable do
       expect {
         test_form.record_determination!(
           decision_method: :automated,
-          reason: "test",
+          reasons: [ "test" ],
           outcome: :automated_exemption
           # missing determination_data
         )
@@ -57,7 +57,7 @@ RSpec.describe Strata::Determinable do
       expect {
         test_form.record_determination!(
           decision_method: :automated,
-          reason: "test",
+          reasons: [ "test" ],
           outcome: :automated_exemption,
           determination_data: {}
         )

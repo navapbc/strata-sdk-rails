@@ -9,7 +9,7 @@ class CreateStrataDeterminations < ActiveRecord::Migration[7.2]
 
       # Decision metadata
       t.string :decision_method, null: false    # :automated, :staff_review, :attestation
-      t.string :reason, null: false             # why the determination was made
+      t.string :reasons, array: true, default: [], null: false  # array of reasons for the determination
       t.string :outcome, null: false            # result of the determination
 
       # Supporting data (e.g., rules engine output)
