@@ -4,7 +4,7 @@
 #
 # By default, Strata::Determination provides:
 # - A polymorphic +subject+ association to any aggregate root
-# - Validations for all required fields (+decision_method+, +reason+, +outcome+, +determination_data+, +determined_at+)
+# - Validations for all required fields (+decision_method+, +reasons+, +outcome+, +determination_data+, +determined_at+)
 # - Query scopes for filtering by subject, decision method, reason, outcome, user, and time windows
 # - Support for automated, staff-reviewed, and attested determinations
 #
@@ -19,7 +19,7 @@
 #     enum decision_method: { automated: "automated", staff_review: "staff_review", attestation: "attestation" }
 #     enum outcome: { approved: "approved", denied: "denied", pending: "pending" }
 #
-#     validates :reason, inclusion: { in: %w(pregnant_member incarcerated other) }
+#     validates :reasons, inclusion: { in: %w(pregnant_member incarcerated other) }
 #   end
 #
 # @example Query determinations for a specific subject

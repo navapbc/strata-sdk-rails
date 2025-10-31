@@ -10,7 +10,7 @@ module Strata
   #   my_form = MyApplicationForm.new
   #   my_form.record_determination!(
   #     decision_method: :automated,
-  #     reason: "pregnant_member",
+  #     reasons: ["pregnant_member"],
   #     outcome: :automated_exemption,
   #     determined_at: Date.today,
   #     determination_data: ruleset.output_data.reasons
@@ -31,7 +31,7 @@ module Strata
     #
     # @param decision_method [String, Symbol] How the determination was made
     #   (attestation, automated, staff_review)
-    # @param reason [String] Why this determination was made
+    # @param reasons [Array<String>] Why this determination was made
     #   (e.g., pregnant_member, incarcerated, requirements_verification)
     # @param outcome [String, Symbol] Result of determination
     #   (e.g., automated_exemption, requirements_met, requirements_not_met)
@@ -42,10 +42,10 @@ module Strata
     #
     # @return [Strata::Determination] The created determination record
     # @raise [ActiveRecord::RecordInvalid] If the record fails validation
-    def record_determination!(decision_method:, reason:, outcome:, determination_data:, determined_at:, determined_by_id: nil)
+    def record_determination!(decision_method:, reasons:, outcome:, determination_data:, determined_at:, determined_by_id: nil)
       determinations.create!(
         decision_method:,
-        reason:,
+        reasons:,
         outcome:,
         determination_data:,
         determined_at:,

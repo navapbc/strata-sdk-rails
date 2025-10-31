@@ -12,7 +12,7 @@ module Strata
   # @example Recording an automated determination
   #   record.record_determination!(
   #     decision_method: :automated,
-  #     reason: "pregnant_member",
+  #     reasons: ["pregnant_member"],
   #     outcome: :automated_exemption,
   #     determination_data: RulesEngine.new.evaluate(:pregnant_member).reasons
   #   )
@@ -20,7 +20,7 @@ module Strata
   # @example Recording a staff-reviewed determination
   #   record.record_determination!(
   #     decision_method: :staff_review,
-  #     reason: "requirements_verification",
+  #     reasons: ["requirements_verification"],
   #     outcome: :requirements_met,
   #     determination_data: RulesEngine.new.evaluate(:requirements_verification).reasons,
   #     determined_by_id: staff_uuid
@@ -32,7 +32,7 @@ module Strata
     belongs_to :subject, polymorphic: true, optional: false
 
     # Validations
-    validates :decision_method, :reason, :outcome, :determination_data, :determined_at, presence: true
+    validates :decision_method, :reasons, :outcome, :determination_data, :determined_at, presence: true
 
     # Query scopes for filtering determinations
 
@@ -56,7 +56,7 @@ module Strata
     }
     scope :with_reason, lambda { |reason_or_reasons|
       reasons = Array(reason_or_reasons).map(&:to_s)
-      where(reason: reasons)
+      where("reasons && ARRAY[?]::varchar[]", reasons)
     }
     scope :with_outcome, lambda { |outcome_or_outcomes|
       outcomes = Array(outcome_or_outcomes).map(&:to_s)

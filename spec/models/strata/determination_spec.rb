@@ -11,7 +11,7 @@ RSpec.describe Strata::Determination do
     subject { build(:strata_determination) }
 
     it { is_expected.to validate_presence_of(:decision_method) }
-    it { is_expected.to validate_presence_of(:reason) }
+    it { is_expected.to validate_presence_of(:reasons) }
     it { is_expected.to validate_presence_of(:outcome) }
     it { is_expected.to validate_presence_of(:determination_data) }
     it { is_expected.to validate_presence_of(:determined_at) }
@@ -35,25 +35,25 @@ RSpec.describe Strata::Determination do
 
     let(:determination_form_1_auto) do
       build(:strata_determination, subject: test_form_alpha, decision_method: :automated,
-                                    reason: "age_under_19", outcome: :automated_exemption,
+                                    reasons: [ "age_under_19" ], outcome: :automated_exemption,
                                     determined_at: Date.new(2025, 1, 10))
     end
 
     let(:determination_form_1_review) do
       build(:strata_determination, subject: test_form_alpha, decision_method: :staff_review,
-                                    reason: "requirements_verification", outcome: :requirements_met,
+                                    reasons: [ "requirements_verification" ], outcome: :requirements_met,
                                     determined_at: Date.new(2025, 1, 15))
     end
 
     let(:determination_form_2_attest) do
       build(:strata_determination, subject: test_form_bravo, decision_method: :attestation,
-                                    reason: "user_declaration", outcome: :accepted,
+                                    reasons: [ "user_declaration" ], outcome: :accepted,
                                     determined_at: Date.new(2025, 1, 20))
     end
 
     let(:determination_passport_auto) do
       build(:strata_determination, subject: passport_form, decision_method: :automated,
-                                    reason: "us_citizen", outcome: :automated_exemption,
+                                    reasons: [ "us_citizen" ], outcome: :automated_exemption,
                                     determined_at: Date.new(2025, 1, 25))
     end
 
@@ -191,6 +191,21 @@ RSpec.describe Strata::Determination do
       it 'filters by symbol' do
         results = described_class.with_reason(:age_under_19)
         expect(results).to contain_exactly(determination_form_1_auto)
+      end
+
+      it 'matches determinations with multiple reasons that overlap with query' do
+        # Test for ANY-of matching: if a determination has multiple reasons,
+        # it matches if ANY of its reasons overlap with the query reasons
+        multi_reason_det = build(:strata_determination, subject: test_form_alpha,
+                                  decision_method: :automated,
+                                  reasons: [ "age_under_19", "pregnant_member" ],
+                                  outcome: :automated_exemption,
+                                  determined_at: Date.new(2025, 1, 12))
+        multi_reason_det.save!
+
+        # Query with one of the reasons should match
+        results = described_class.with_reason('pregnant_member')
+        expect(results).to contain_exactly(multi_reason_det)
       end
     end
 
