@@ -98,6 +98,29 @@ RSpec.describe Strata::Generators::BusinessProcessGenerator, type: :generator do
     end
   end
 
+  describe "when name already includes BusinessProcess suffix" do
+    let(:generator) { described_class.new([ 'TestBusinessProcess' ], options.merge(quiet: true), destination_root: destination_root) }
+
+    before do
+      allow(generator).to receive(:generate).and_call_original
+      allow(generator).to receive(:yes?).and_return(false)
+      generator.invoke_all
+    end
+
+    it "does not duplicate BusinessProcess in class name" do
+      business_process_file = "#{destination_root}/app/business_processes/test_business_process.rb"
+      content = File.read(business_process_file)
+      expect(content).to include("class TestBusinessProcess < Strata::BusinessProcess")
+      expect(content).not_to include("TestBusinessProcessBusinessProcess")
+    end
+
+    it "does not duplicate BusinessProcess in file name" do
+      business_process_file = "#{destination_root}/app/business_processes/test_business_process.rb"
+      expect(File.exist?(business_process_file)).to be true
+      expect(File.exist?("#{destination_root}/app/business_processes/test_business_process_business_process.rb")).to be false
+    end
+  end
+
   describe "with custom case and application_form options" do
     let(:case_option) { Faker::Name.first_name }
     let(:app_form_option) { Faker::Name.first_name }
@@ -167,6 +190,64 @@ RSpec.describe Strata::Generators::BusinessProcessGenerator, type: :generator do
 
       # rstrip to remove trailing newline
       expect(content.rstrip).to eq(expected.rstrip)
+    end
+  end
+
+  describe "when config.after_initialize is commented out" do
+    before do
+      File.write("#{destination_root}/config/application.rb", <<~RUBY)
+        module Dummy
+          class Application < Rails::Application
+            config.load_defaults Rails::VERSION::STRING.to_f
+
+            # config.after_initialize do
+            #   OldBusinessProcess.start_listening_for_events
+            # end
+          end
+        end
+      RUBY
+
+      generator_with_commented_config = described_class.new([ 'Test' ], { quiet: true }, destination_root: destination_root)
+      allow(generator_with_commented_config).to receive(:generate).and_call_original
+      allow(generator_with_commented_config).to receive(:yes?).and_return(false)
+      generator_with_commented_config.invoke_all
+    end
+
+    it "creates new uncommented config.after_initialize block" do
+      content = File.read("#{destination_root}/config/application.rb")
+
+      # Verify new uncommented block exists
+      expect(content).to match(/^\s+config\.after_initialize do/)
+      expect(content).to include("TestBusinessProcess.start_listening_for_events")
+
+      # Verify commented block is preserved
+      expect(content).to include("# config.after_initialize do")
+      expect(content).to include("#   OldBusinessProcess.start_listening_for_events")
+
+      # Verify the uncommented block is inside Application class (before closing end)
+      lines = content.lines
+      app_class_line = lines.find_index { |l| l.include?("class Application") }
+      app_class_end_line = nil
+      indent_level = 0
+
+      lines[(app_class_line + 1)..-1].each_with_index do |line, idx|
+        stripped = line.strip
+        next if stripped.start_with?("#")
+        if stripped.match?(/\bdo(\s*\|[^|]*\|)?\s*$/)
+          indent_level += 1
+        elsif stripped == "end"
+          indent_level -= 1
+          if indent_level == 0
+            app_class_end_line = app_class_line + 1 + idx
+            break
+          end
+        end
+      end
+
+      config_block_line = lines.find_index { |l| l.match?(/^\s+config\.after_initialize do/) && !l.strip.start_with?("#") }
+      expect(config_block_line).to be > app_class_line
+      expect(app_class_end_line).not_to be_nil, "Could not find Application class end"
+      expect(config_block_line).to be < app_class_end_line if app_class_end_line
     end
   end
 

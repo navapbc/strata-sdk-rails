@@ -19,6 +19,7 @@ module Strata
       end
 
       def create_task_file
+        check_strata_tasks_table
         template "task.rb", File.join("app/models", "#{file_path}.rb")
       end
 
@@ -26,21 +27,32 @@ module Strata
         template "task_spec.rb", File.join("spec/models", "#{file_path}_spec.rb")
       end
 
+      private
+
       def check_strata_tasks_table
         return if options[:"skip-migration-check"]
 
         unless ActiveRecord::Base.connection.table_exists?(:strata_tasks)
           say "Warning: strata_tasks table does not exist.", :yellow
-          if yes?("Would you like to install and run Strata migrations now? (y/n)")
-            rails_command "strata:install:migrations"
+          if yes?("Would you like to create and run the strata_tasks migration now? (y/n)")
+            create_strata_tasks_migration
             rails_command "db:migrate"
           else
-            say "You may need to run 'bin/rails strata:install:migrations' and 'bin/rails db:migrate' before using your task class.", :yellow
+            say "You may need to create the strata_tasks migration and run 'bin/rails db:migrate' before using your task class.", :yellow
           end
         end
       end
 
-      private
+      def create_strata_tasks_migration
+        # Check if migration already exists
+        migration_name = "create_strata_tasks"
+        migration_files = Dir.glob(File.join(destination_root, "db/migrate/*_#{migration_name}.rb"))
+
+        return if migration_files.any?
+
+        timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
+        template "create_strata_tasks.rb.tt", "db/migrate/#{timestamp}_#{migration_name}.rb"
+      end
 
       def format_task_name(name)
         formatted = name.underscore.classify

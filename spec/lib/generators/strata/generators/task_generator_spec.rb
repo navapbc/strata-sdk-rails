@@ -111,17 +111,21 @@ RSpec.describe Strata::Generators::TaskGenerator, type: :generator do
         expect(generator).to have_received(:say).with("Warning: strata_tasks table does not exist.", :yellow)
       end
 
-      it "prompts to install and run migrations" do
+      it "prompts to create and run migrations" do
         generator.invoke_all
-        expect(generator).to have_received(:yes?).with("Would you like to install and run Strata migrations now? (y/n)")
+        expect(generator).to have_received(:yes?).with("Would you like to create and run the strata_tasks migration now? (y/n)")
       end
 
-      it "runs strata:install:migrations first, then db:migrate when user agrees" do
+      it "creates migration and runs db:migrate when user agrees" do
+        FileUtils.mkdir_p("#{destination_root}/db/migrate")
         allow(generator).to receive(:yes?).and_return(true)
         allow(generator).to receive(:rails_command)
         generator.invoke_all
-        expect(generator).to have_received(:rails_command).with("strata:install:migrations").ordered
-        expect(generator).to have_received(:rails_command).with("db:migrate").ordered
+        expect(generator).to have_received(:rails_command).with("db:migrate")
+
+        # Check that migration file was created
+        migration_files = Dir.glob("#{destination_root}/db/migrate/*_create_strata_tasks.rb")
+        expect(migration_files.length).to eq(1)
       end
     end
 

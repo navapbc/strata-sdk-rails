@@ -46,41 +46,94 @@ module Strata
 
         start_listening_call = "    #{business_process_name}BusinessProcess.start_listening_for_events"
 
-        if content.include?("config.after_initialize")
+        # Check for uncommented config.after_initialize block (not in comments)
+        lines = content.lines
+        block_start_index = nil
+        block_indent = nil
+
+        lines.each_with_index do |line, index|
+          stripped = line.strip
+          # Check if this is an uncommented config.after_initialize line
+          if !stripped.start_with?("#") && stripped.match?(/\bconfig\.after_initialize\s+do(\s*\|[^|]*\|)?\s*$/)
+            block_start_index = index
+            block_indent = line[/^\s*/]
+            break
+          end
+        end
+
+        if block_start_index
           if content.include?(start_listening_call.strip)
             return
           end
 
-          content = content.gsub(/(config\.after_initialize\s+do(?:\s*\|[^|]*\|)?\s*\n)(.*?)(\n\s*end)/m) do |match|
-            opening = $1
-            existing_content = $2
-            closing = $3
+          # Find the matching end for this block
+          block_end_index = nil
+          indent_level = 1
 
-            "#{opening}#{existing_content}\n  #{start_listening_call}#{closing}"
+          lines[(block_start_index + 1)..-1].each_with_index do |line, rel_index|
+            abs_index = block_start_index + 1 + rel_index
+            stripped = line.strip
+
+            # Skip comment lines
+            next if stripped.start_with?("#")
+
+            # Check for nested do blocks
+            if stripped.match?(/\bdo(\s*\|[^|]*\|)?\s*$/)
+              indent_level += 1
+            elsif stripped == "end"
+              indent_level -= 1
+              if indent_level == 0
+                block_end_index = abs_index
+                break
+              end
+            end
+          end
+
+          if block_end_index
+            # Insert the start_listening call before the closing end
+            # start_listening_call already includes proper indentation (4 spaces)
+            # but we need to match the block's indentation style
+            call_without_indent = start_listening_call.strip
+            insert_line = "#{block_indent}  #{call_without_indent}"
+            lines.insert(block_end_index, insert_line)
+            content = lines.map(&:chomp).join("\n") + "\n"
+          else
+            raise "Could not find matching end for config.after_initialize block"
           end
         else
           # Find the Application class and insert before its closing end
-          # Look for "class Application < Rails::Application" and find its matching end
-          class_start = content.index(/class Application < Rails::Application/)
-          if class_start
-            # Find all 'end' statements after the class declaration
-            remaining_content = content[class_start..-1]
-            lines = remaining_content.split("\n")
+          # Work with full file content to properly calculate positions
+          lines = content.lines
+          class_start_line_index = nil
+          application_end_line_index = nil
 
-            # Find the line with the Application class end (should be before module end)
-            application_end_line_index = nil
-            indent_level = 0
+          # Find the Application class start
+          lines.each_with_index do |line, index|
+            if line.strip.start_with?("class Application") && line.include?("< Rails::Application")
+              class_start_line_index = index
+              break
+            end
+          end
 
-            lines.each_with_index do |line, index|
-              if line.strip.start_with?("class Application")
-                indent_level = 1
-              elsif line.strip.match?(/\bdo(\s*\|[^|]*\|)?\s*$/) && indent_level > 0
-                # Line ends with 'do' or 'do |param|' - increment indent level
+          if class_start_line_index
+            # Find the matching end for the Application class
+            indent_level = 1
+            class_indent = lines[class_start_line_index][/^\s*/]
+
+            lines[(class_start_line_index + 1)..-1].each_with_index do |line, rel_index|
+              abs_index = class_start_line_index + 1 + rel_index
+              stripped = line.strip
+
+              # Skip comment lines for indentation tracking
+              next if stripped.start_with?("#")
+
+              # Check for nested do blocks
+              if stripped.match?(/\bdo(\s*\|[^|]*\|)?\s*$/)
                 indent_level += 1
-              elsif line.strip == "end" && indent_level > 0
+              elsif stripped == "end"
                 indent_level -= 1
                 if indent_level == 0
-                  application_end_line_index = index
+                  application_end_line_index = abs_index
                   break
                 end
               end
@@ -91,18 +144,20 @@ module Strata
               before_lines = lines[0...application_end_line_index]
               after_lines = lines[application_end_line_index..-1]
 
+              # Determine correct indentation (should match class body indentation)
+              class_body_indent = "    " # Standard Rails Application class uses 4 spaces
+
               after_initialize_lines = [
                 "",
-                "    config.after_initialize do",
-                "  #{start_listening_call}",
-                "    end"
+                "#{class_body_indent}config.after_initialize do",
+                "#{class_body_indent}  #{start_listening_call.strip}",
+                "#{class_body_indent}end"
               ]
 
-              new_lines = before_lines + after_initialize_lines + after_lines
-              new_remaining_content = new_lines.join("\n")
-              content = content[0...class_start] + new_remaining_content
+              new_lines = before_lines.map(&:chomp) + after_initialize_lines + after_lines.map(&:chomp)
+              content = new_lines.join("\n") + "\n"
             else
-              raise "Could not find Application class end to insert config.after_initialize block"
+              raise "Could not find matching end for Application class to insert config.after_initialize block"
             end
           else
             raise "Could not find Application class to insert config.after_initialize block"
@@ -115,11 +170,15 @@ module Strata
       private
 
       def business_process_name
-        name.classify
+        # Remove "BusinessProcess" suffix if present to avoid duplication in class name
+        base_name = name.gsub(/BusinessProcess$/i, "")
+        base_name.classify
       end
 
       def file_name
-        name.underscore
+        # Remove "BusinessProcess" suffix if present to avoid duplication
+        base_name = name.gsub(/BusinessProcess$/i, "")
+        base_name.underscore
       end
 
       def business_process_file_path
