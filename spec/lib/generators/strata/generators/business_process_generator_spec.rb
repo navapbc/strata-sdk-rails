@@ -247,7 +247,7 @@ RSpec.describe Strata::Generators::BusinessProcessGenerator, type: :generator do
       config_block_line = lines.find_index { |l| l.match?(/^\s+config\.after_initialize do/) && !l.strip.start_with?("#") }
       expect(config_block_line).to be > app_class_line
       expect(app_class_end_line).not_to be_nil, "Could not find Application class end"
-      expect(config_block_line).to be < app_class_end_line if app_class_end_line
+      expect(config_block_line).to be < app_class_end_line
     end
   end
 

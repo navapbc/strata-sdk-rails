@@ -48,7 +48,10 @@ module Strata
         migration_name = "create_strata_tasks"
         migration_files = Dir.glob(File.join(destination_root, "db/migrate/*_#{migration_name}.rb"))
 
-        return if migration_files.any?
+        if migration_files.any?
+          say "Migration for strata_tasks already exists, skipping creation.", :yellow
+          return
+        end
 
         timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
         template "create_strata_tasks.rb.tt", "db/migrate/#{timestamp}_#{migration_name}.rb"
