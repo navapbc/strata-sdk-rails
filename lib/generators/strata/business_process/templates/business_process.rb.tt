@@ -2,7 +2,7 @@ class <%= business_process_name %>BusinessProcess < Strata::BusinessProcess
 
   <% if case_name != business_process_name %>
   def self.case_class
-    "<%= case_name %>"
+    "<%= case_name %>".constantize
   end
   <% end %>
 
