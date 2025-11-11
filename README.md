@@ -16,6 +16,9 @@
   <a href="https://github.com/navapbc/strata-sdk/issues">
     <img src="https://img.shields.io/github/commit-activity/m/navapbc/strata-sdk" alt="git commit activity" />
   </a>
+  <a href="https://deepwiki.com/navapbc/flex-sdk">
+    <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" />
+  </a>
 </h4>
 
 ## Installation
