@@ -11,6 +11,7 @@ RSpec.describe Strata::FormBuilder do
 
       attribute :first_name, :string
       attribute :start_date, :date  # for date_picker
+      attribute :tag_ids, default: []  # for collection_checkboxes
     end
 
     stub_const("TestForm", test_form_class)
@@ -607,6 +608,92 @@ RSpec.describe Strata::FormBuilder do
 
       it 'passes through HTML options to the input' do
         expect(result).to have_element(:input, 'data-test': 'value', 'aria-label': 'Amount')
+      end
+    end
+  end
+
+  describe '#collection_check_boxes' do
+    # Create a simple Tag class for testing
+    let(:tag_class) do
+      Struct.new(:id, :name, keyword_init: true)
+    end
+
+    let(:tags) do
+      [
+        tag_class.new(id: 1, name: 'Ruby'),
+        tag_class.new(id: 2, name: 'Rails'),
+        tag_class.new(id: 3, name: 'JavaScript')
+      ]
+    end
+
+    let(:result) { builder.collection_check_boxes(:tag_ids, tags, :id, :name) }
+
+    it 'wraps the collection in a fieldset with legend' do
+      expect(result).to have_element(:fieldset, class: 'usa-fieldset')
+      expect(result).to have_element(:legend, class: 'usa-legend')
+    end
+
+    it 'outputs checkboxes with USWDS classes automatically' do
+      expect(result).to have_element(:input, type: 'checkbox', class: 'usa-checkbox__input')
+      expect(result).to have_element(:input, type: 'checkbox', class: 'usa-checkbox__input--tile')
+    end
+
+    it 'wraps each checkbox in a usa-checkbox div' do
+      expect(result).to have_element(:div, class: 'usa-checkbox', count: 3)
+    end
+
+    it 'outputs labels with USWDS classes' do
+      expect(result).to have_element(:label, class: 'usa-checkbox__label', count: 3)
+      expect(result).to have_element(:label, text: 'Ruby', class: 'usa-checkbox__label')
+      expect(result).to have_element(:label, text: 'Rails', class: 'usa-checkbox__label')
+      expect(result).to have_element(:label, text: 'JavaScript', class: 'usa-checkbox__label')
+    end
+
+    it 'outputs checkboxes for each item in the collection' do
+      expect(result).to have_element(:input, type: 'checkbox', value: '1', name: 'object[tag_ids][]')
+      expect(result).to have_element(:input, type: 'checkbox', value: '2', name: 'object[tag_ids][]')
+      expect(result).to have_element(:input, type: 'checkbox', value: '3', name: 'object[tag_ids][]')
+    end
+
+    context 'with custom legend' do
+      let(:result) { builder.collection_check_boxes(:tag_ids, tags, :id, :name, { legend: 'Select your tags' }) }
+
+      it 'displays the custom legend' do
+        expect(result).to have_element(:legend, text: 'Select your tags', class: 'usa-legend')
+      end
+    end
+
+    context 'with tile option set to false' do
+      let(:result) { builder.collection_check_boxes(:tag_ids, tags, :id, :name, { tile: false }) }
+
+      it 'does not include the tile class' do
+        expect(result).to have_element(:input, type: 'checkbox', class: 'usa-checkbox__input')
+        expect(result).not_to have_element(:input, type: 'checkbox', class: 'usa-checkbox__input--tile')
+      end
+    end
+
+    context 'with errors' do
+      before do
+        object.errors.add(:tag_ids, 'must select at least one tag')
+      end
+
+      it 'displays the error message' do
+        expect(result).to have_element(:span, text: 'Tag ids must select at least one tag', class: 'usa-error-message')
+      end
+
+      it 'adds error styling to the form group' do
+        expect(result).to have_element(:div, class: 'usa-form-group--error')
+      end
+    end
+
+    context 'with pre-selected values' do
+      let(:object) { TestForm.new(tag_ids: [1, 3]) }
+      let(:result) { builder.collection_check_boxes(:tag_ids, tags, :id, :name, { checked: [1, 3] }) }
+
+      it 'marks the selected checkboxes as checked' do
+        expect(result).to have_element(:input, type: 'checkbox', value: '1', checked: true)
+        expect(result).to have_element(:input, type: 'checkbox', value: '2', checked: false)
+        expect(result).to have_element(:input, type: 'checkbox', value: '3', checked: true)
       end
     end
   end

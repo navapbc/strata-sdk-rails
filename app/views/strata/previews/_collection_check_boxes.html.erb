@@ -1,0 +1,3 @@
+<%= strata_form_with(model: model, url: false) do |f| %>
+  <%= f.collection_check_boxes :service_ids, services, :id, :name, legend_options %>
+<% end %>

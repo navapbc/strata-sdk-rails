@@ -20,4 +20,7 @@ class TestRecord < ApplicationRecord
   strata_attribute :names, :name, array: true
   strata_attribute :reporting_periods, :year_quarter, array: true
   strata_attribute :activity_reporting_periods, :year_month, array: true
+
+  # Simple array attribute for collection_checkboxes preview
+  attribute :service_ids, default: []
 end

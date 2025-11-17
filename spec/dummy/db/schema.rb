@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_31_212542) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_17_203853) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -122,6 +122,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_31_212542) do
     t.string "activity_reporting_period"
     t.string "base_period_start"
     t.string "base_period_end"
+    t.integer "service_ids", default: [], array: true
   end
 
   create_table "users", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|

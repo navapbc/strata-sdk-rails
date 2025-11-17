@@ -396,6 +396,49 @@ module Strata
       end
     end
 
+    # Renders a collection of checkboxes with USWDS styling.
+    #
+    # @param [Symbol] attribute The attribute name
+    # @param [Array] collection The collection to iterate over
+    # @param [Symbol, Proc] value_method The method to call on each item to get the checkbox value
+    # @param [Symbol, Proc] text_method The method to call on each item to get the label text
+    # @param [Hash] options Options for the collection
+    # @param [Hash] html_options HTML options for the checkboxes
+    # @option options [String] :legend Custom legend text for the fieldset
+    # @option options [Boolean] :tile Whether to use tile styling (default: true)
+    # @return [String] The rendered HTML for the checkbox collection
+    # @see https://designsystem.digital.gov/components/checkbox/
+    #
+    # @example Basic usage
+    #   <%= f.collection_check_boxes :reporting_periods, @periods, :id, :name %>
+    #
+    # @example With custom legend
+    #   <%= f.collection_check_boxes :tags, @tags, :id, :name, { legend: "Select Tags" } %>
+    def collection_check_boxes(attribute, collection, value_method, text_method, options = {}, html_options = {})
+      legend_text = options.delete(:legend) || human_name(attribute)
+      tile = options.key?(:tile) ? options.delete(:tile) : true
+
+      # Merge USWDS checkbox class into html_options
+      append_to_option(html_options, :class, " usa-checkbox__input")
+      append_to_option(html_options, :class, " usa-checkbox__input--tile") if tile
+
+      # Build the checkboxes using Rails' collection_check_boxes
+      checkboxes = super(attribute, collection, value_method, text_method, options, html_options) do |builder|
+        @template.content_tag(:div, class: "usa-checkbox") do
+          builder.check_box + builder.label(class: "usa-checkbox__label")
+        end
+      end
+
+      # Wrap in fieldset with legend and error handling
+      fieldset(legend_text, { attribute: attribute }) do
+        if has_error?(attribute)
+          field_error(attribute) + checkboxes
+        else
+          checkboxes
+        end
+      end
+    end
+
     # Renders an address input with street, city, state, zip code fields.
     #
     # @param [Symbol] attribute The attribute name
