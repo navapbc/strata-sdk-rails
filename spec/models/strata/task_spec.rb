@@ -114,6 +114,22 @@ RSpec.describe Strata::Task, type: :model do
         expect { task.pending! }.to publish_event_with_payload("Strata::TaskPending", { task_id: task.id, case_id: task.case_id })
       end
     end
+
+    describe '#on_hold' do
+      it 'marks the task as on hold' do
+        task.on_hold!
+        task.reload
+
+        expect(task.status).to eq('on_hold')
+        expect(task.on_hold?).to be true
+      end
+
+      it 'emits an event as on hold' do
+        task.pending! # Set it to pending first to ensure a status change
+
+        expect { task.on_hold! }.to publish_event_with_payload("Strata::TaskOnHold", { task_id: task.id, case_id: task.case_id })
+      end
+    end
   end
 
   describe 'validations' do
