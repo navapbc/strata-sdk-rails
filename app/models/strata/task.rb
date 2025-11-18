@@ -30,7 +30,7 @@ module Strata
     protected attr_writer :assignee_id
 
     attribute :status, :integer, default: 0
-    enum :status, pending: 0, completed: 1
+    enum :status, pending: 0, completed: 1, on_hold: 2
 
     belongs_to :case, polymorphic: true
     validates :case, presence: true
@@ -74,7 +74,7 @@ module Strata
     private
 
     def publish_status_changed_event
-      Strata::EventManager.publish("#{self.class.name}#{status.capitalize}", { task_id: id, case_id: case_id })
+      Strata::EventManager.publish("#{self.class.name}#{status.camelize}", { task_id: id, case_id: case_id })
     end
   end
 end
