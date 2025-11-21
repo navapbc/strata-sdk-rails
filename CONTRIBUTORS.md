@@ -16,7 +16,7 @@ Contributors will be automatically added here when the project sets up:
 - Manual additions by maintainers
 
 For now, you can view all contributors on GitHub:
-https://github.com/navapbc/strata-sdk/graphs/contributors
+https://github.com/navapbc/strata-sdk-rails/graphs/contributors
 -->
 
 ## Core Team

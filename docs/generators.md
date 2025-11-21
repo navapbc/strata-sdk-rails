@@ -71,7 +71,7 @@ bin/rails generate strata:income_records_migration NAME period_type
 
 ### strata:staff
 
-Creates a standard set of files required for implementing a staff dashboard in applications using the strata-sdk. This generator scaffolds controllers, views, and tests for staff task management. [See full usage guide](../lib/generators/strata/staff/USAGE)
+Creates a standard set of files required for implementing a staff dashboard in applications using the `strata` gem. This generator scaffolds controllers, views, and tests for staff task management. [See full usage guide](../lib/generators/strata/staff/USAGE)
 
 ```bash
 bin/rails generate strata:staff

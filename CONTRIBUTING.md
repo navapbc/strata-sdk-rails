@@ -21,8 +21,8 @@ This project and everyone participating in it is governed by our [Code of Conduc
 
 There are many ways to contribute to Strata SDK:
 
-- **Report bugs**: If you find a bug, please [open an issue](https://github.com/navapbc/strata-sdk/issues/new?template=bug_report.md) with details about the problem
-- **Suggest enhancements**: Have ideas for new features? [Open an issue](https://github.com/navapbc/strata-sdk/issues/new?template=feature_request.md) to discuss it
+- **Report bugs**: If you find a bug, please [open an issue](https://github.com/navapbc/strata-sdk-rails/issues/new?template=bug_report.md) with details about the problem
+- **Suggest enhancements**: Have ideas for new features? [Open an issue](https://github.com/navapbc/strata-sdk-rails/issues/new?template=feature_request.md) to discuss it
 - **Improve documentation**: Help make our docs clearer and more comprehensive
 - **Submit code changes**: Fix bugs, add features, or improve performance
 
@@ -49,8 +49,8 @@ Before you begin, ensure you have the following installed:
 
 1. **Clone the repository** (or your fork):
    ```bash
-   git clone https://github.com/navapbc/strata-sdk.git
-   cd strata-sdk
+   git clone https://github.com/navapbc/strata-sdk-rails.git
+   cd strata-sdk-rails
    ```
 
 2. **Run the setup command** (this will install dependencies, create the `.env` file, and initialize the database):
@@ -93,15 +93,15 @@ make help
 
 ### 1. Fork the Repository
 
-1. Navigate to [https://github.com/navapbc/strata-sdk](https://github.com/navapbc/strata-sdk)
+1. Navigate to [https://github.com/navapbc/strata-sdk-rails](https://github.com/navapbc/strata-sdk-rails)
 2. Click the "Fork" button in the top right corner
 3. This creates a copy of the repository in your GitHub account
 
 ### 2. Clone Your Fork
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/strata-sdk.git
-cd strata-sdk
+git clone https://github.com/YOUR-USERNAME/strata-sdk-rails.git
+cd strata-sdk-rails
 ```
 
 ### 3. Set Up Upstream Remote
@@ -109,7 +109,7 @@ cd strata-sdk
 Add the original repository as an upstream remote to keep your fork in sync:
 
 ```bash
-git remote add upstream https://github.com/navapbc/strata-sdk.git
+git remote add upstream https://github.com/navapbc/strata-sdk-rails.git
 ```
 
 ### 4. Create a Branch
@@ -175,7 +175,7 @@ git push origin feature/your-feature-name
 
 1. Go to your fork on GitHub
 2. Click "Compare & pull request" button
-3. Ensure the base repository is `navapbc/strata-sdk` and base branch is `main`
+3. Ensure the base repository is `navapbc/strata-sdk-rails` and base branch is `main`
 4. Fill out the PR template with:
    - **Clear title**: Summarize the change in one line
    - **Description**: Explain what changes you made and why

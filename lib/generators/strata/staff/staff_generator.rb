@@ -4,11 +4,11 @@ require "rails/generators"
 
 module Strata
   module Generators
-    # Generator for creating staff dashboard components for applications using the strata-sdk
+    # Generator for creating staff dashboard components for applications using the `strata` gem
     class StaffGenerator < Rails::Generators::Base
       source_root File.expand_path("templates", __dir__)
 
-      desc "Creates staff dashboard components for applications using the strata-sdk"
+      desc "Creates staff dashboard components for applications using the `strata` gem"
 
       def create_staff_controller
         template "staff_controller.rb", "app/controllers/staff_controller.rb"

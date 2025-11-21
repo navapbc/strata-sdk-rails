@@ -1,5 +1,5 @@
 Description:
-    Creates a standard set of files required for implementing a staff dashboard in applications using the strata-sdk.
+    Creates a standard set of files required for implementing a staff dashboard in applications using the `strata` gem.
 
 Usage:
     bin/rails generate strata:staff
