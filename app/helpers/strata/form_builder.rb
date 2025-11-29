@@ -82,8 +82,13 @@ module Strata
 
       label_text = options.delete(:label)
 
+      # When multiple: true, we need to generate the correct ID for the label's 'for' attribute
+      # Rails generates IDs like: #{attribute_name}_#{checkbox_value} for multi-value checkboxes
+      checked_value = args[0] if args.length > 0
+      label_for_id = checked_value ? field_id(attribute, checked_value) : field_id(attribute)
+
       @template.content_tag(:div, class: "usa-checkbox") do
-        super(attribute, options, *args) + us_toggle_label("checkbox", attribute, label_text, options)
+        super(attribute, options, *args) + us_toggle_label("checkbox", attribute, label_text, options.merge(for: label_for_id))
       end
     end
 
@@ -332,7 +337,7 @@ module Strata
     end
 
     def fieldset(legend, options = {}, &block)
-      legend_classes = "usa-legend"
+      legend_classes = "usa-legend margin-top-0"
 
       if options[:large_legend]
         legend_classes += " usa-legend--large"
