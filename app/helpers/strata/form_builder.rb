@@ -343,7 +343,7 @@ module Strata
         legend_classes += " usa-legend--large"
       end
 
-      form_group(options[:attribute]) do
+      form_group(options[:attribute], options[:group_options] || {}) do
         @template.content_tag(:fieldset, class: "usa-fieldset") do
           @template.content_tag(:legend, legend, class: legend_classes) + @template.capture(&block)
         end
