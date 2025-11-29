@@ -343,9 +343,15 @@ module Strata
         legend_classes += " usa-legend--large"
       end
 
+      if options[:hint]
+        hint_el = hint(options[:hint])
+      else
+        hint_el = ""
+      end
+
       form_group(options[:attribute], options[:group_options] || {}) do
         @template.content_tag(:fieldset, class: "usa-fieldset") do
-          @template.content_tag(:legend, legend, class: legend_classes) + @template.capture(&block)
+          @template.content_tag(:legend, legend, class: legend_classes) + hint_el + @template.capture(&block)
         end
       end
     end
