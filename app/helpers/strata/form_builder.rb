@@ -204,7 +204,7 @@ module Strata
       end
       month_options.unshift([ I18n.t("strata.form_builder.select_month"), "" ])
 
-      fieldset(legend_text) do
+      fieldset(legend_text, options) do
         @template.content_tag(:span, hint_text, class: "usa-hint", id: hint_id) +
         field_error(attribute) +
         @template.content_tag(:div, class: "usa-memorable-date") do
@@ -276,7 +276,7 @@ module Strata
       first_hint_id = "#{attribute}_first_hint"
       last_hint_id = "#{attribute}_last_hint"
 
-      fieldset(legend_text) do
+      fieldset(legend_text, options) do
         @template.content_tag(:div) do
           # We need to pass builder: self.class only for testing purposes, but it shouldn't harm
           # anything in production. This is because in the test context fields_for
@@ -377,8 +377,8 @@ module Strata
     end
 
     def yes_no(attribute, options = {})
-      yes_options = options[:yes_options] || {}
-      no_options = options[:no_options] || {}
+      yes_options = options.delete(:yes_options) || {}
+      no_options = options.delete(:no_options) || {}
       value = if object then object.send(attribute) else nil end
 
       yes_options = { label: I18n.t("strata.form_builder.boolean_true") }.merge(yes_options)
@@ -387,7 +387,7 @@ module Strata
       @template.capture do
         # Hidden field included for same reason as radio button collections (https://api.rubyonrails.org/classes/ActionView/Helpers/FormOptionsHelper.html#method-i-collection_radio_buttons)
         hidden_field(attribute, value: "") +
-        fieldset(options[:legend] || human_name(attribute), { attribute: attribute }) do
+        fieldset(options[:legend] || human_name(attribute), options.merge{ attribute: attribute }) do
           buttons =
             radio_button(attribute, true, yes_options) +
             radio_button(attribute, false, no_options)
@@ -410,7 +410,7 @@ module Strata
     def address_fields(attribute, options = {})
       legend_text = options.delete(:legend) || I18n.t("strata.form_builder.address.legend")
 
-      fieldset(legend_text) do
+      fieldset(legend_text, options) do
         @template.content_tag(:div) do
           # Street address line 1
           @template.content_tag(:div, class: "usa-form-group") do
@@ -474,7 +474,7 @@ module Strata
       start_hint_text = I18n.t("strata.form_builder.date_range.start_hint")
       end_hint_text = I18n.t("strata.form_builder.date_range.end_hint")
 
-      fieldset(legend_text) do
+      fieldset(legend_text, options) do
         field_error(attribute) +
         form_group do
           date_picker(
