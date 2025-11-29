@@ -387,7 +387,7 @@ module Strata
       @template.capture do
         # Hidden field included for same reason as radio button collections (https://api.rubyonrails.org/classes/ActionView/Helpers/FormOptionsHelper.html#method-i-collection_radio_buttons)
         hidden_field(attribute, value: "") +
-        fieldset(options[:legend] || human_name(attribute), options.merge{ attribute: attribute }) do
+        fieldset(options[:legend] || human_name(attribute), options.merge({ attribute: attribute })) do
           buttons =
             radio_button(attribute, true, yes_options) +
             radio_button(attribute, false, no_options)
