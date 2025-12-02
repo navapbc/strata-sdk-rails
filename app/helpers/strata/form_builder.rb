@@ -349,9 +349,15 @@ module Strata
         hint_el = ""
       end
 
+      if options[:attribute] && has_error?(options[:attribute])
+        error_el = field_error(options[:attribute])
+      else
+        error_el = ""
+      end
+
       form_group(options[:attribute], options[:group_options] || {}) do
         @template.content_tag(:fieldset, class: "usa-fieldset") do
-          @template.content_tag(:legend, legend, class: legend_classes) + hint_el + @template.capture(&block)
+          @template.content_tag(:legend, legend, class: legend_classes) + hint_el + error_el + @template.capture(&block)
         end
       end
     end
