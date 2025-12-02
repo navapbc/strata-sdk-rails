@@ -204,9 +204,8 @@ module Strata
       end
       month_options.unshift([ I18n.t("strata.form_builder.select_month"), "" ])
 
-      fieldset(legend_text, options) do
+      fieldset(legend_text, options.merge({ attribute: attribute })) do
         @template.content_tag(:span, hint_text, class: "usa-hint", id: hint_id) +
-        field_error(attribute) +
         @template.content_tag(:div, class: "usa-memorable-date") do
           fields_for attribute do |date_of_birth_fields|
             # Month select
@@ -400,15 +399,8 @@ module Strata
         # Hidden field included for same reason as radio button collections (https://api.rubyonrails.org/classes/ActionView/Helpers/FormOptionsHelper.html#method-i-collection_radio_buttons)
         hidden_field(attribute, value: "") +
         fieldset(options[:legend] || human_name(attribute), options.merge({ attribute: attribute })) do
-          buttons =
-            radio_button(attribute, true, yes_options) +
-            radio_button(attribute, false, no_options)
-
-          if has_error?(attribute)
-            field_error(attribute) + buttons
-          else
-            buttons
-          end
+          radio_button(attribute, true, yes_options) +
+          radio_button(attribute, false, no_options)
         end
       end
     end
@@ -422,7 +414,7 @@ module Strata
     def address_fields(attribute, options = {})
       legend_text = options.delete(:legend) || I18n.t("strata.form_builder.address.legend")
 
-      fieldset(legend_text, options) do
+      fieldset(legend_text, options.merge({ attribute: attribute })) do
         @template.content_tag(:div) do
           # Street address line 1
           @template.content_tag(:div, class: "usa-form-group") do
@@ -486,8 +478,7 @@ module Strata
       start_hint_text = I18n.t("strata.form_builder.date_range.start_hint")
       end_hint_text = I18n.t("strata.form_builder.date_range.end_hint")
 
-      fieldset(legend_text, options) do
-        field_error(attribute) +
+      fieldset(legend_text, options.merge({ attribute: attribute })) do
         form_group do
           date_picker(
             "#{attribute}_start",
