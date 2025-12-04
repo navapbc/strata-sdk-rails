@@ -17,6 +17,9 @@
   <a href="https://github.com/navapbc/strata-sdk-rails/repos/">
     <img alt="GitHub Downloads (all assets, all releases)" src="https://img.shields.io/github/downloads/navapbc/strata-sdk-rails/total">
   </a>
+  <a href="https://deepwiki.com/navapbc/flex-sdk">
+    <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" />
+  </a>
 </h4>
 
 ## Installation
