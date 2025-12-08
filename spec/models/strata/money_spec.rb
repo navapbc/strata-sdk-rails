@@ -153,10 +153,16 @@ RSpec.describe Strata::Money do
   describe "#cents_amount" do
     let(:money) { described_class.new(cents: 1234) }
 
-
-
     it "returns amount as integer in cents" do
       expect(money.cents_amount).to eq(1234)
+    end
+  end
+
+  describe "#to_i" do
+    let(:money) { described_class.new(cents: rand(1..1_000_000)) }
+
+    it "returns amount as integer in cents" do
+      expect(money.to_i).to eq(money.cents_amount)
     end
   end
 

@@ -99,6 +99,13 @@ module Strata
       number_to_currency(dollar_amount)
     end
 
+    # Returns the amount as an Integer in cents
+    #
+    # @return [Integer] The cents amount
+    def to_i
+      cents
+    end
+
     # Comparison operator for Comparable
     #
     # @param [Money] other The other Money object to compare
