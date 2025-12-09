@@ -275,7 +275,7 @@ module Strata
       first_hint_id = "#{attribute}_first_hint"
       last_hint_id = "#{attribute}_last_hint"
 
-      fieldset(legend_text, options) do
+      fieldset(legend_text, options.merge({ attribute: attribute })) do
         @template.content_tag(:div) do
           # We need to pass builder: self.class only for testing purposes, but it shouldn't harm
           # anything in production. This is because in the test context fields_for
