@@ -107,7 +107,9 @@ module Strata
     end
 
     def select(attribute, choices, options = {}, html_options = {})
-      append_to_option(html_options, :class, " usa-select")
+      classes = "usa-select"
+      classes += " usa-input--error" if has_error?(attribute)
+      append_to_option(html_options, :class, classes)
 
       label_text = options.delete(:label)
       skip_form_group = options.delete(:skip_form_group)
