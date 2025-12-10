@@ -386,6 +386,10 @@ module Strata
         append_to_option(options, :class, " usa-form-group--error")
       end
 
+      if attribute && options[:id].blank?
+        append_to_option(options, :id, form_group_id(attribute))
+      end
+
       @template.content_tag(:div, children, options)
     end
 
@@ -586,6 +590,10 @@ module Strata
         [ "AE - Armed Forces Europe", "AE" ],
         [ "AP - Armed Forces Pacific", "AP" ]
       ]
+    end
+        
+    def form_group_id(attribute)
+      "#{field_id(attribute)}_form_group"
     end
 
     private
