@@ -590,7 +590,7 @@ module Strata
         [ "AP - Armed Forces Pacific", "AP" ]
       ]
     end
-        
+
     def form_group_id(attribute)
       "#{field_id(attribute)}_form_group"
     end
