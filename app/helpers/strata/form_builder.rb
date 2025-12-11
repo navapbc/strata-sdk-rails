@@ -107,7 +107,7 @@ module Strata
     end
 
     def select(attribute, choices, options = {}, html_options = {})
-      classes = "usa-select"
+      classes = " usa-select"
       classes += " usa-input--error" if has_error?(attribute)
       append_to_option(html_options, :class, classes)
 
@@ -217,7 +217,6 @@ module Strata
                 month_options,
                 { label: "Month", skip_form_group: true, selected: month_value },
                 {
-                  class: "usa-select",
                   "aria-describedby": hint_id
                 }
               )
@@ -459,7 +458,7 @@ module Strata
               "#{attribute}_state",
               us_states_and_territories,
               { label: I18n.t("strata.form_builder.address.state_label") },
-              { class: "usa-select", autocomplete: "address-level1" }
+              { autocomplete: "address-level1" }
             )
           end +
 
