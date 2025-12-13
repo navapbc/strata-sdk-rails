@@ -15,7 +15,7 @@ module Strata::Flows
   #       question_page :leave_dates
   #     end
   #   end
-  class ApplicationFormFlow
+  module ApplicationFormFlow
     extend ActiveSupport::Concern
     include Rails.application.routes.url_helpers
 
@@ -47,7 +47,7 @@ module Strata::Flows
 
       # Defines a new task block
       def task(task_name, &block)
-        @current_task = Flows::Task.new(task_name)
+        @current_task = Task.new(task_name)
         tasks.push(@current_task)
         block.call
         @current_task = nil
@@ -57,7 +57,7 @@ module Strata::Flows
       # If no fields are provided, we assume that the page
       # has one field which matches the name of the page.
       def question_page(page_name, fields: nil)
-        page = Flows::QuestionPage.new(page_name, fields:)
+        page = QuestionPage.new(page_name, fields:)
         @current_task.pages.push(page)
         contexts.push(page_name)
       end

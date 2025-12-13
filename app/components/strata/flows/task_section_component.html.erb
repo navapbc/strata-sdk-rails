@@ -1,0 +1,16 @@
+<li class="usa-collection__item border-base-light border-bottom-1px border-top-0 padding-top-0 margin-top-0 maxw-full">
+    <div class="usa-collection__body padding-top-2 padding-bottom-4">
+        <ul class="usa-collection__meta" aria-label="Step <%= @flow.task_counter(@task) + 1 %>">
+            <li class="usa-collection__meta-item margin-bottom-1"><%= t("step") %> <%= @flow.task_counter(@task) + 1 %></li>
+        </ul>
+        <div class="grid-row">
+            <div class="grid-col-12 tablet:grid-col-9 margin-bottom-2 tablet:margin-bottom-0">
+                <h2><%= t("#{@task.name}.title") %></h2>
+                <p class="usa-collection__description">
+                    <%= t("#{@task.name}.description") %>
+                </p>
+            </div>
+            <div class="grid-col-12 tablet:grid-col-3 text-right"><%= task_action %> </div>
+        </div>        
+    </div>
+</li>

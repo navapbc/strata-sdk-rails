@@ -41,7 +41,7 @@ module Strata::Flows
               # Search for the current page based on the request action
               if [ page.edit_pathname.to_sym, page.update_pathname.to_sym ].include?(request.path_parameters[:action].to_sym)
                 @flow_page = page
-                @flow_task = Flows::TaskEvaluator.new(task, flow_record, page_idx)
+                @flow_task = TaskEvaluator.new(task, flow_record, page_idx)
                 return
               end
             end

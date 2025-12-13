@@ -1,0 +1,13 @@
+<%# locals: (flow:, translation_prefix:) %>
+
+<ul class="usa-collection">
+    <% @flow.tasks.each do |task| %>
+        <%= render @task_section_component_class.new(flow: @flow, task:) %>
+    <% end %>
+</ul>
+
+<%= button_to t("actions.review_and_submit"),
+            @flow.end_path,
+            method: :get,
+            class: "usa-button margin-top-2",
+            disabled: !@flow.completed? %>
