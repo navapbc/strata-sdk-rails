@@ -1,0 +1,12 @@
+en:
+  paid_leave_applications:
+    task_section_component:
+      personal_information:
+        title: Personal Information
+        description: Tell us about yourself. You’ll need to enter your Social Security Number (SSN) or Individual Taxpayer Identification Number (ITIN).
+      employment_details:
+        title: Employment
+        description: Tell us about your employer. You’ll need to enter their legal name and their 9 digit federal employer identification number (FEIN or EIN).
+      leave_details:
+        title: Leave Details
+        description: Tell us about the type of leave you’re taking (Parental, Medical, Family Caregiving, or Military Exigency). You’ll need to enter your leave dates and provide supporting documentation.

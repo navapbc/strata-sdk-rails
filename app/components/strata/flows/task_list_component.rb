@@ -15,10 +15,12 @@ module Strata
     class TaskListComponent < ViewComponent::Base
       def initialize(
         flow:,
-        task_section_component_class: TaskSectionComponent
+        task_section_component_class: TaskSectionComponent,
+        show_step_label: false
       )
         @flow = flow
         @task_section_component_class = task_section_component_class
+        @show_step_label = show_step_label
       end
     end
   end
