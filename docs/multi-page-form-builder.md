@@ -119,7 +119,7 @@ resources "leave_application_forms" do
     member do
       LeaveApplicationFormFlow.pages.each do |page|
         get page.edit_pathname
-        get page.update_pathname
+        patch page.update_pathname
       end
     end
 end

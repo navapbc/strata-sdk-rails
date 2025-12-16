@@ -11,7 +11,7 @@ Rails.application.routes.draw do
     member do
       PaidLeaveFlow.pages.each do |page|
         get page.edit_pathname
-        get page.update_pathname
+        patch page.update_pathname
       end
       get :review
     end
