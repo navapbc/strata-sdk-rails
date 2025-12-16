@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Lookbook preview for the TaskListComponent.
-class PaidLeaveTaskListPreview < ViewComponent::Preview
+class PaidLeaveTaskListPreview < Lookbook::Preview
   def default
     flow = PaidLeaveFlow.new(FactoryBot.build_stubbed(
       :paid_leave_application,
@@ -23,5 +23,9 @@ class PaidLeaveTaskListPreview < ViewComponent::Preview
       flow:,
       show_step_label: true
     )
+  end
+
+  def diagram
+    render template: "strata/previews/_business_process", locals: { business_process: PaidLeaveFlow }
   end
 end
