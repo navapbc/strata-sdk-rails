@@ -57,7 +57,7 @@ module Strata
       end
 
       def self.headers
-        self.columns.map { |column| t(".#{column}") }
+        columns.map { |column| t(".#{column}") }
       end
 
       protected

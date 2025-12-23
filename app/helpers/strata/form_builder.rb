@@ -24,8 +24,8 @@ module Strata
     # @param args [Array] Arguments passed to the parent FormBuilder constructor
     def initialize(*args)
       super
-      self.options[:html] ||= {}
-      self.options[:html][:class] ||= "usa-form usa-form--large"
+      options[:html] ||= {}
+      options[:html][:class] ||= "usa-form usa-form--large"
     end
 
     ########################################

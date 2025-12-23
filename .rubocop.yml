@@ -60,3 +60,5 @@ Style/Documentation:
 
 Style/FrozenStringLiteralComment:
   Enabled: true
+Style/RedundantSelf:
+  Enabled: true
