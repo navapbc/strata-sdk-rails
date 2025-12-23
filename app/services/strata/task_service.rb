@@ -30,15 +30,15 @@ module Strata
     # @note Currently defaults to {Strata::TaskService::Database} if no service is set.
     #   Future versions may determine the service based on environment configuration.
     def self.get
-      if self.service.nil?
+      if service.nil?
         # Other ideas for adapters: asana, jira, salesforce, trello
         # In the future, we can determine the task service based on the environment
         # e.g. something like task_service_name = ENV["TASK_SERVICE"] || "Strata::TaskService::Database"
         # self.service = task_service_name.constantize.new
-        self.set(Strata::TaskService::Database.new)
+        set(Strata::TaskService::Database.new)
       end
 
-      self.service
+      service
     end
   end
 end
