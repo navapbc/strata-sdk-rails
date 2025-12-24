@@ -163,7 +163,28 @@ RSpec.describe Strata::FormBuilder do
       let(:result) { builder.fieldset('Legend', large_legend: true) { 'Fieldset content' } }
 
       it 'outputs a large legend' do
-        expect(result).to have_element(:legend, class: 'usa-legend usa-legend--large')
+        expect(result).to have_element(:legend, class: 'usa-legend margin-top-0 usa-legend--large')
+      end
+    end
+
+    context 'with a hint provided' do
+      let(:result) { builder.fieldset('Legend', hint: "Fieldset hint") { 'Fieldset content' } }
+
+      it 'outputs a hint' do
+        expect(result).to have_element(:div, class: 'usa-hint')
+      end
+    end
+
+    context 'with a fieldset attribute error' do
+      let(:result) { builder.fieldset('Legend', attribute: "first_name") { 'Fieldset content' } }
+
+      before do
+        object.errors.add(:first_name, 'is invalid')
+      end
+
+      it 'outputs an error message' do
+        expect(result).to have_element(:div, class: 'usa-form-group--error')
+        expect(result).to have_element(:span, text: 'is invalid', class: 'usa-error-message')
       end
     end
   end
@@ -180,6 +201,19 @@ RSpec.describe Strata::FormBuilder do
 
       it 'outputs a label' do
         expect(result).to have_element(:label, text: 'Custom label', class: 'usa-label')
+      end
+    end
+
+    context 'with an error' do
+      let(:result) { builder.select(:first_name, [ 'Option 1', 'Option 2' ]) }
+
+      before do
+        object.errors.add(:first_name, 'is invalid')
+      end
+
+      it 'outputs an error message' do
+        expect(result).to have_element(:select, class: 'usa-select usa-input--error')
+        expect(result).to have_element(:span, text: 'is invalid', class: 'usa-error-message')
       end
     end
   end
@@ -213,6 +247,14 @@ RSpec.describe Strata::FormBuilder do
 
       it 'outputs a hint' do
         expect(result).to have_element(:span, text: 'Check this box', class: 'usa-checkbox__label-description')
+      end
+    end
+
+    context 'with multi-value checkboxes' do
+      let(:result) { builder.check_box(:first_name, { label: "123" }, "val_123") }
+
+      it 'sets a unique "for" value for the label' do
+        expect(result).to have_element(:label, text: '123', for: 'object_first_name_val_123')
       end
     end
   end
