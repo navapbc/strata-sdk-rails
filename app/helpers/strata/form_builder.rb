@@ -82,8 +82,13 @@ module Strata
 
       label_text = options.delete(:label)
 
+      # When multiple: true, we need to generate the correct ID for the label's 'for' attribute
+      # Rails generates IDs like: #{attribute_name}_#{checkbox_value} for multi-value checkboxes
+      checked_value = args[0] if args.length > 0
+      label_for_id = checked_value ? field_id(attribute, checked_value) : field_id(attribute)
+
       @template.content_tag(:div, class: "usa-checkbox") do
-        super(attribute, options, *args) + us_toggle_label("checkbox", attribute, label_text, options)
+        super(attribute, options, *args) + us_toggle_label("checkbox", attribute, label_text, options.merge(for: label_for_id))
       end
     end
 
@@ -102,7 +107,9 @@ module Strata
     end
 
     def select(attribute, choices, options = {}, html_options = {})
-      append_to_option(html_options, :class, " usa-select")
+      classes = " usa-select"
+      classes += " usa-input--error" if has_error?(attribute)
+      append_to_option(html_options, :class, classes)
 
       label_text = options.delete(:label)
       skip_form_group = options.delete(:skip_form_group)
@@ -199,9 +206,8 @@ module Strata
       end
       month_options.unshift([ I18n.t("strata.form_builder.select_month"), "" ])
 
-      fieldset(legend_text) do
+      fieldset(legend_text, options.merge({ attribute: attribute })) do
         @template.content_tag(:span, hint_text, class: "usa-hint", id: hint_id) +
-        field_error(attribute) +
         @template.content_tag(:div, class: "usa-memorable-date") do
           fields_for attribute do |date_of_birth_fields|
             # Month select
@@ -211,7 +217,6 @@ module Strata
                 month_options,
                 { label: "Month", skip_form_group: true, selected: month_value },
                 {
-                  class: "usa-select",
                   "aria-describedby": hint_id
                 }
               )
@@ -271,7 +276,7 @@ module Strata
       first_hint_id = "#{attribute}_first_hint"
       last_hint_id = "#{attribute}_last_hint"
 
-      fieldset(legend_text) do
+      fieldset(legend_text, options.merge({ attribute: attribute })) do
         @template.content_tag(:div) do
           # We need to pass builder: self.class only for testing purposes, but it shouldn't harm
           # anything in production. This is because in the test context fields_for
@@ -332,15 +337,27 @@ module Strata
     end
 
     def fieldset(legend, options = {}, &block)
-      legend_classes = "usa-legend"
+      legend_classes = "usa-legend margin-top-0"
 
       if options[:large_legend]
         legend_classes += " usa-legend--large"
       end
 
-      form_group(options[:attribute]) do
+      if options[:hint]
+        hint_el = hint(options[:hint])
+      else
+        hint_el = ""
+      end
+
+      if options[:attribute] && has_error?(options[:attribute])
+        error_el = field_error(options[:attribute])
+      else
+        error_el = ""
+      end
+
+      form_group(options[:attribute], options[:group_options] || {}) do
         @template.content_tag(:fieldset, class: "usa-fieldset") do
-          @template.content_tag(:legend, legend, class: legend_classes) + @template.capture(&block)
+          @template.content_tag(:legend, legend, class: legend_classes) + hint_el + error_el + @template.capture(&block)
         end
       end
     end
@@ -368,12 +385,16 @@ module Strata
         append_to_option(options, :class, " usa-form-group--error")
       end
 
+      if attribute && options[:id].blank?
+        append_to_option(options, :id, form_group_id(attribute))
+      end
+
       @template.content_tag(:div, children, options)
     end
 
     def yes_no(attribute, options = {})
-      yes_options = options[:yes_options] || {}
-      no_options = options[:no_options] || {}
+      yes_options = options.delete(:yes_options) || {}
+      no_options = options.delete(:no_options) || {}
       value = if object then object.send(attribute) else nil end
 
       yes_options = { label: I18n.t("strata.form_builder.boolean_true") }.merge(yes_options)
@@ -382,16 +403,9 @@ module Strata
       @template.capture do
         # Hidden field included for same reason as radio button collections (https://api.rubyonrails.org/classes/ActionView/Helpers/FormOptionsHelper.html#method-i-collection_radio_buttons)
         hidden_field(attribute, value: "") +
-        fieldset(options[:legend] || human_name(attribute), { attribute: attribute }) do
-          buttons =
-            radio_button(attribute, true, yes_options) +
-            radio_button(attribute, false, no_options)
-
-          if has_error?(attribute)
-            field_error(attribute) + buttons
-          else
-            buttons
-          end
+        fieldset(options[:legend] || human_name(attribute), options.merge({ attribute: attribute })) do
+          radio_button(attribute, true, yes_options) +
+          radio_button(attribute, false, no_options)
         end
       end
     end
@@ -405,7 +419,7 @@ module Strata
     def address_fields(attribute, options = {})
       legend_text = options.delete(:legend) || I18n.t("strata.form_builder.address.legend")
 
-      fieldset(legend_text) do
+      fieldset(legend_text, options.merge({ attribute: attribute })) do
         @template.content_tag(:div) do
           # Street address line 1
           @template.content_tag(:div, class: "usa-form-group") do
@@ -444,7 +458,7 @@ module Strata
               "#{attribute}_state",
               us_states_and_territories,
               { label: I18n.t("strata.form_builder.address.state_label") },
-              { class: "usa-select", autocomplete: "address-level1" }
+              { autocomplete: "address-level1" }
             )
           end +
 
@@ -469,8 +483,7 @@ module Strata
       start_hint_text = I18n.t("strata.form_builder.date_range.start_hint")
       end_hint_text = I18n.t("strata.form_builder.date_range.end_hint")
 
-      fieldset(legend_text) do
-        field_error(attribute) +
+      fieldset(legend_text, options.merge({ attribute: attribute })) do
         form_group do
           date_picker(
             "#{attribute}_start",
@@ -576,6 +589,10 @@ module Strata
         [ "AE - Armed Forces Europe", "AE" ],
         [ "AP - Armed Forces Pacific", "AP" ]
       ]
+    end
+
+    def form_group_id(attribute)
+      "#{field_id(attribute)}_form_group"
     end
 
     private
