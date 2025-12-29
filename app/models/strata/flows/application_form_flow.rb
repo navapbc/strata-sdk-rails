@@ -82,7 +82,7 @@ module Strata::Flows
         @end_pathname = path
       end
 
-      def find_page_and_task_by_action(action)
+      def find_page_and_task_by_action(flow_record, action)
         tasks.each do |task|
           task.pages.each_with_index do |page, page_idx|
             # Search for the current page based on the request action

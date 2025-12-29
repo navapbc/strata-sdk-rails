@@ -36,7 +36,7 @@ module Strata::Flows
 
         # Set a @flow_task instance that can provide completion methods and routing helpers.
         define_method(:set_flow_task) do
-          @flow_page, @flow_task = flow_class.find_page_and_task_by_action(request.path_parameters[:action])
+          @flow_page, @flow_task = flow_class.find_page_and_task_by_action(flow_record, request.path_parameters[:action])
         end
 
         # For each question page, define the edit and update paths.
