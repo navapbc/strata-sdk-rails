@@ -82,6 +82,19 @@ module Strata::Flows
         @end_pathname = path
       end
 
+      def find_page_and_task_by_action(action)
+        tasks.each do |task|
+          task.pages.each_with_index do |page, page_idx|
+            # Search for the current page based on the request action
+            if [ page.edit_pathname.to_sym, page.update_pathname.to_sym ].include?(action.to_sym)
+              return page, TaskEvaluator.new(task, flow_record, page_idx)
+            end
+          end
+        end
+
+        return nil, nil
+      end
+
       def to_mermaid
         diagram = "flowchart TD\n"
 
