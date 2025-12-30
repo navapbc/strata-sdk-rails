@@ -36,7 +36,7 @@ module Strata::Flows
 
       while next_page_idx >= 0
         page = pages[next_page_idx]
-        return page.edit_path(@record) if page.needed?
+        return page.edit_path(@record) if page.needed?(@record)
         next_page_idx -= 1
       end
 
@@ -52,7 +52,7 @@ module Strata::Flows
 
       while next_page_idx <= pages.length - 1
         page = pages[next_page_idx]
-        return page.edit_path(@record) if page.needed?
+        return page.edit_path(@record) if page.needed?(@record)
         next_page_idx += 1
       end
 
