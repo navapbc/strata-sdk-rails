@@ -13,6 +13,7 @@ module Strata::Flows
   #     task :leave_details do
   #       question_page :leave_type
   #       question_page :leave_dates
+  #       question_page :supporting_documents, if: ->(app) { app.leave_type_medical? }
   #     end
   #   end
   module ApplicationFormFlow
@@ -56,8 +57,8 @@ module Strata::Flows
       # Defines an individual question page.
       # If no fields are provided, we assume that the page
       # has one field which matches the name of the page.
-      def question_page(page_name, fields: nil)
-        page = QuestionPage.new(page_name, fields:)
+      def question_page(page_name, if: nil, fields: nil)
+        page = QuestionPage.new(page_name, if:, fields:)
         @current_task.pages.push(page)
         contexts.push(page_name)
       end

@@ -6,9 +6,16 @@ module Strata::Flows
     include Rails.application.routes.url_helpers
     attr_accessor :name, :fields
 
-    def initialize(name, fields: nil)
+    def initialize(name, if:, fields: nil)
+      reserved_attributes = { if: }
+
       @name = name
+      @if = reserved_attributes[:if]
       @fields = fields || [ @name.to_sym ]
+    end
+
+    def needed?(record)
+      @if.blank? || @if.call(record)
     end
 
     def completed?(record)

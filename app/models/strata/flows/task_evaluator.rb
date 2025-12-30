@@ -32,8 +32,15 @@ module Strata::Flows
     end
 
     def prev_path
-      return nil if @current_page_idx === 0
-      pages[@current_page_idx - 1].edit_path(@record)
+      next_page_idx = @current_page_idx - 1
+
+      while next_page_idx >= 0
+        page = pages[next_page_idx]
+        return page.edit_path(@record) if page.needed?
+        next_page_idx -= 1
+      end
+
+      nil
     end
 
     def update_path
@@ -41,8 +48,15 @@ module Strata::Flows
     end
 
     def next_path
-      return nil if @current_page_idx === pages.length - 1
-      pages[@current_page_idx + 1].edit_path(@record)
+      next_page_idx = @current_page_idx + 1
+
+      while next_page_idx <= pages.length - 1
+        page = pages[next_page_idx]
+        return page.edit_path(@record) if page.needed?
+        next_page_idx += 1
+      end
+
+      nil
     end
   end
 end
