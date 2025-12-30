@@ -7,6 +7,16 @@ Rails.application.routes.draw do
 
   resources :passport_application_forms, only: [ :index, :new, :show, :create ]
 
+  resources "paid_leave_applications" do
+    member do
+      PaidLeaveFlow.pages.each do |page|
+        get page.edit_pathname
+        patch page.update_pathname
+      end
+      get :review
+    end
+  end
+
   scope path: "/staff" do
     resources :passport_cases do
       collection do

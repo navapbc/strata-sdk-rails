@@ -1,0 +1,8 @@
+---
+en:
+  step: Step
+  actions:
+    completed: Completed
+    continue: Continue
+    start: Start
+    edit: Edit
