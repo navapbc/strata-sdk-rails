@@ -61,7 +61,7 @@ module Strata
     include BusinessProcessBuilder
 
     def self.case_class
-      self.name.sub("BusinessProcess", "Case").constantize
+      name.sub("BusinessProcess", "Case").constantize
     end
 
     def self.get_step(name)
