@@ -10,7 +10,7 @@ module Strata
   class Engine < ::Rails::Engine
     isolate_namespace Strata
 
-    initializer "strata.helpers" do
+    config.to_prepare do
       ActiveSupport.on_load :action_controller do
         helper Strata::ApplicationHelper
       end
