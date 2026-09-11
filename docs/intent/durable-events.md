@@ -8,6 +8,9 @@
 > This is an intent, not a design. It records what we want and why, and the
 > constraints a design has to respect. It deliberately stops short of choosing
 > an implementation — see [Open questions](#open-questions).
+>
+> The design that follows from this intent is
+> [docs/specs/durable-events/spec.md](../specs/durable-events/spec.md).
 
 ## Problem
 
