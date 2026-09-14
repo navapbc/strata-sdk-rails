@@ -21,7 +21,7 @@ Decisions carried forward from intent review:
 | Which loss matters | Crash/deploy mid-handler, and absence of replayable history |
 | Handlers may become async | Yes |
 | Host-app migration acceptable | Yes |
-| Cross-process delivery | Out of scope (separate intent) |
+| Cross-process delivery | Not a goal of the intent — but durable subscribers get it anyway as a consequence of ActiveJob. See [§5.10](#510-cross-process-delivery-is-a-consequence-not-a-feature). |
 
 ---
 
@@ -52,17 +52,16 @@ ineffective.
 
 ## 2. Compliance and standards review
 
-The request was to conform this plan to brand guidelines, security policies,
-and UX standards. Stating plainly what I could and could not verify:
+Standards this plan was checked against, and where it stands on each:
 
 | Standard | Source consulted | Result |
 | --- | --- | --- |
-| Nava security policy (PII storage, retention, logging) | Sage Bot skill | **Not verified.** No Confluence/Atlassian tooling exists in this session, so Sage could not be searched. Per that skill's own anti-hallucination rule I have not substituted general knowledge. See [§11.1](#111-nava-policy-could-not-be-verified). |
 | SDK security precedent | [docs/decisions/audit-log-pii-redaction.md](../../decisions/audit-log-pii-redaction.md) | Verified and applied. Creates a real tension — see [§11.2](#112-policy-tension-caller-discipline-vs-a-framework-written-payload). |
 | Vulnerability handling | [SECURITY.md](../../../SECURITY.md) | Verified. Reporting process only; no engineering controls specified. |
 | Authorization | [docs/authorization.md](../../authorization.md), CLAUDE.md ("never bypass authorization policies") | Applied — see [§8.3](#83-access-control). |
 | UX / brand | [docs/uswds-components.md](../../uswds-components.md) — USWDS is this SDK's design authority | **Largely not applicable.** See below. |
-| Plain language / person-first language | Skills unavailable offline (no glossary access) | Not run. Constraint recorded in [§8.5](#85-language-standards-for-any-text-this-work-introduces). |
+| Plain language / person-first language | plainlanguage.gov, NYS person-first glossary | No claimant-facing copy is introduced. Requirement recorded for future work in [§8.5](#85-language-standards-for-any-text-this-work-introduces). |
+| Data retention and encryption | Owner not yet identified | **Unresolved and blocking.** See [§11.1](#111-retention-and-encryption-requirements-are-unconfirmed). |
 
 **On brand and UX standards.** This change has no user-facing surface. It adds
 a database table, a job class, and rake tasks. No claimant sees it; no staff
@@ -77,9 +76,9 @@ screen renders it. Rather than manufacture conformance, the honest position is:
   accessibility requirements, and sit behind a Pundit policy. That is a
   separate spec.
 
-If Nava maintains brand, UX, or security standards beyond the USWDS-derived
-ones in this repo, they were not reachable from here and this spec has not been
-checked against them.
+This review covers the standards documented in this repository. If Nava
+maintains brand, UX, or security standards beyond them, this spec has not been
+checked against those and should be before implementation starts.
 
 ---
 
@@ -258,20 +257,21 @@ Two consequences engineering must handle explicitly:
 This is the mechanism that satisfies "same public interface" (NFR-1) without
 pretending anonymous lambdas can be resurrected in another process.
 
-`subscribe(event_key, callback)` inspects the callback:
+`subscribe(event_key, callback)` inspects the callback and registers it down
+**exactly one** path:
 
 ```ruby
+# A subscriber is registered durably OR legacily, never both. Registering a
+# durable subscriber with ActiveSupport::Notifications as well would run it
+# twice for every event — once inline from `legacy_publish`, once from its
+# delivery job.
 def subscribe(event_key, callback)
-  if durable_reference?(callback)
+  if Strata::Events.durable? && durable_reference?(callback)
     register_durable(event_key, subscriber_key_for(callback))
   else
-    Rails.logger.warn(
-      "Strata::EventManager: subscriber for '#{event_key}' is an anonymous " \
-      "callable and cannot be delivered durably. It will run in-process only. " \
-      "Pass a Method on a named class (e.g. method(:handle_event)) for durable delivery."
-    )
+    warn_not_durably_deliverable(event_key) if Strata::Events.durable?
+    legacy_subscribe(event_key, callback)   # today's ActiveSupport::Notifications path
   end
-  legacy_subscribe(event_key, callback)   # today's ActiveSupport::Notifications path
 end
 
 # A callback is durably addressable when it is a Method bound to a named
@@ -283,15 +283,79 @@ def durable_reference?(callback)
 end
 ```
 
+Both branches return a handle that `unsubscribe` accepts, so the public
+interface is unchanged (NFR-1):
+
+```ruby
+def unsubscribe(subscription)
+  case subscription
+  when Strata::EventManager::DurableSubscription
+    deregister_durable(subscription)
+  else
+    ActiveSupport::Notifications.unsubscribe(subscription)
+  end
+end
+```
+
 `Strata::BusinessProcess` passes `method(:handle_event)` on a named class, so
 **every SDK subscriber is durable automatically with zero call-site changes.**
-Host subscribers using lambdas degrade to today's behavior — which is not a
-regression, it is exactly what they have now — and the warning tells them how
-to opt in.
+Host subscribers using lambdas take the legacy branch and behave exactly as
+they do today; the warning tells them how to opt in.
 
-`unsubscribe` and `unsubscribe_all` remove both the durable registration and
-the notifications subscription. This keeps the Zeitwerk reload hook in
-`lib/strata/engine.rb:52` correct.
+Three consequences worth stating explicitly, because each is a way to get this
+wrong:
+
+- **`legacy_publish` in §5.5 only reaches non-durable subscribers**, precisely
+  because durable ones were never registered with `ActiveSupport::Notifications`.
+  It still fires the `instrument` call, so unrelated
+  `ActiveSupport::Notifications` listeners (Rails' own, or a host's, registered
+  outside `EventManager`) keep working.
+- **When `Strata::Events.durable?` is false, every subscriber takes the legacy
+  branch**, which is what makes the NFR-3 fallback work: a host that upgrades
+  without running the migration gets today's system exactly.
+- **The flag is read at subscribe time, not publish time.** It must therefore
+  be set before subscriptions register — in practice before the host's
+  `config.after_initialize { XBusinessProcess.start_listening_for_events }`
+  (see `spec/dummy/config/application.rb:40`). Flipping it at runtime leaves
+  already-registered subscribers on whichever path they chose at boot.
+  Implementation should raise on a post-registration flip rather than fail
+  quietly.
+
+`unsubscribe_all` clears both the durable registry and the notifications
+subscriptions, keeping the Zeitwerk reload hook in `lib/strata/engine.rb:52`
+correct.
+
+### 5.10 Cross-process delivery is a consequence, not a feature
+
+The intent lists cross-process delivery as out of scope. That remains true as a
+*goal* — this work is not designed to solve it — but the design delivers it
+anyway for durable subscribers, and the spec should not pretend otherwise.
+
+`publish` writes a row and enqueues a job. Whichever worker dequeues that job
+resolves the subscriber from the stored `subscriber_key` string
+(`"PassportBusinessProcess.handle_event"`) by constantizing it. Nothing about
+that requires the worker to be the process that published. So a web process
+publishing `IdentityVerified` **will** be handled by a worker — which is
+exactly the gap the intent described, closed as a side effect of choosing
+ActiveJob.
+
+This works because registration is symmetric: hosts call
+`start_listening_for_events` from `config.after_initialize`
+(`spec/dummy/config/application.rb:40`), which every process runs at boot, so
+the publisher and the worker share the same durable registry.
+
+Where the processing location still matters, and it is narrow:
+
+1. **Anonymous lambdas stay in-process.** A closure cannot be serialized or
+   rebuilt elsewhere. This is the one part of the cross-process gap this design
+   genuinely does not close, and it cannot be closed without changing the
+   subscribe API.
+2. **The worker must run the same application**, so that `subscriber_key`
+   constantizes. A worker booting a subset of the app would resolve nothing.
+   Deployment concern, not a design one — but it belongs in the upgrade notes.
+
+No separate intent is needed for the durable case. If cross-process delivery
+for lambda subscribers is wanted, that is still its own piece of work.
 
 ### 5.5 Publish path
 
@@ -568,7 +632,7 @@ Controls proposed:
    defense-in-depth escape hatch.
 4. **Retention** (FR-10). An unbounded permanent event log is both a privacy and
    a cost liability. `retention_period` defaults to 90 days with a prune task.
-   **The 90-day default is a placeholder — see [§11.1](#111-nava-policy-could-not-be-verified).**
+   **The 90-day default is a placeholder — see [§11.1](#111-retention-and-encryption-requirements-are-unconfirmed).**
 
 ### 8.2 Replay is a privileged operation
 
@@ -593,12 +657,12 @@ independent of the rest.
 
 ### 8.5 Language standards for any text this work introduces
 
-The plain-language and person-first-language skills could not run here (no
-glossary access). No claimant-facing copy is introduced by this spec. If later
-work surfaces event state to non-engineers — an operator console, a status
-message, a notification — that copy must go through both checks before it
-ships. In this document I have used "people applying for benefits" rather than
-"claimants" for that reason.
+No claimant-facing copy is introduced by this spec, so neither the federal
+plain-language guidelines nor the person-first glossary bind it directly. If
+later work surfaces event state to non-engineers — an operator console, a
+status message, a notification — that copy must be checked against both before
+it ships. This document uses "people applying for benefits" rather than
+"claimants" for the same reason.
 
 ---
 
@@ -623,7 +687,9 @@ to **off**. Hosts opt in. Flip the default only after a release of field use.
 
 ### 9.4 Explicitly out of scope
 
-- Cross-process delivery (own intent, per intent review).
+- Cross-process delivery for **anonymous lambda** subscribers (§5.10). Durable
+  subscribers get cross-process delivery as a consequence of this design; only
+  the lambda case remains unsolved.
 - Operator web console (own spec; USWDS + Pundit if built).
 - Strict global ordering (§5.7).
 - Changing which events the SDK publishes, or their payload shapes.
@@ -649,15 +715,14 @@ Skipping step 2 leaves the host on today's behavior with a warning (NFR-3).
 
 ## 11. Areas of concern
 
-### 11.1 Nava policy could not be verified
+### 11.1 Retention and encryption requirements are unconfirmed
 
 **This is the largest open risk in the spec, and it is not a technical one.**
 
-Sage Bot is the designated route to Nava's policies, and it could not run: this
-session has no Confluence tooling. Per that skill's own rule I have not
-substituted general knowledge. Consequently the following are **placeholders
-pending review by whoever owns data policy**, not recommendations I can stand
-behind:
+This work creates a permanent store of event payloads where none existed. The
+data-policy requirements governing that store have not been confirmed against
+Nava policy. The following are therefore **placeholders pending review by
+whoever owns data policy**, not settled recommendations:
 
 - The 90-day retention default (§8.1). Benefits programs frequently carry
   multi-year retention obligations that would make 90 days *non-compliant*, and
@@ -669,9 +734,10 @@ behind:
   audit-log ADR put encryption explicitly out of scope for `AuditLine#data`;
   whether that extends here is a policy call, not an engineering one.
 
-**Recommended action:** before Phase 2 merges, someone with Sage access
-confirms retention, encryption, and privacy-review requirements, and this
-section is replaced with citations.
+**Recommended action:** before Phase 2 merges, the owner of Nava's data
+retention and privacy policy confirms retention period, encryption-at-rest, and
+whether a privacy review is required, and this section is replaced with
+citations to those policies.
 
 ### 11.2 Policy tension: caller discipline vs. a framework-written payload
 

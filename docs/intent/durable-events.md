@@ -188,5 +188,12 @@ ones currently absorbing the cost of a stuck case.
   is a real gap, but it is not what this intent is about, and folding it in
   would change the delivery model rather than just make it durable. Worth its
   own intent.
+
+  *(Update, after design: the ActiveJob design chosen in
+  [the spec](../specs/durable-events/spec.md#510-cross-process-delivery-is-a-consequence-not-a-feature)
+  closes this for durable subscribers as a side effect — a worker handles the
+  job regardless of which process published. Only anonymous lambda subscribers
+  remain in-process. This was not a goal; it is a consequence, recorded here so
+  the scope note isn't read as still-true.)*
 - Redesigning the business process DSL or the transition model.
 - Changing what events the SDK publishes, or their payload shapes.
