@@ -37,6 +37,24 @@ module Strata
       end
     end
 
+    initializer "strata.field_error_proc" do
+      ActiveSupport.on_load(:action_view) do
+        # Strata renders its own error markup (usa-input--error,
+        # usa-form-group--error, usa-error-message) for every form helper, so
+        # Rails' default field_with_errors wrapper is redundant on top of that
+        # and breaks USWDS adjacent-sibling selectors (e.g. .usa-input-prefix
+        # + input, input + .usa-input-suffix). Override at the engine level so
+        # the wrapper never appears in Strata-rendered forms.
+        #
+        # A host that explicitly wants the wrapper back can set
+        # ActionView::Base.field_error_proc = ActionView::Base::DEFAULT_FIELD_ERROR_PROC
+        # in their own initializer after Strata's runs.
+        #
+        # See docs/decisions/field-error-proc-override.md (ADR-002).
+        ActionView::Base.field_error_proc = ->(html_tag, _instance) { html_tag }
+      end
+    end
+
     initializer "strata.importmap", before: "importmap" do |app|
       if app.config.respond_to?(:importmap)
         app.config.importmap.paths << Engine.root.join("config/importmap.rb")
