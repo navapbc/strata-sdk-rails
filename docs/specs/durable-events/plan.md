@@ -39,7 +39,7 @@ records places the spec needs correcting against the code as it actually is.
 
 ## Deltas from the spec
 
-Reconnaissance against the current code turned up five places where the spec's
+Reconnaissance against the current code turned up six places where the spec's
 design is right but its detail is wrong. Fix these in the spec as part of Phase
 2, or carry them as known corrections.
 
@@ -72,7 +72,7 @@ queue adapter configured in any environment, and no background-job gem in either
 `Gemfile` or `strata.gemspec`. `Strata::ApplicationJob` is an empty subclass.
 Spec §7's test plan assumes `perform_enqueued_jobs` is available; it is not —
 `ActiveJob::TestHelper` is not included anywhere and would have to be wired up
-first. See [3.6](#36-test-helpers).
+first. See [3.7](#37-test-helpers).
 
 **D5 — the async test surface is larger than spec §7 lists.**
 `spec/dummy/config/application.rb:40` starts `PassportBusinessProcess`
@@ -88,18 +88,31 @@ files the spec names, this also touches
 `spec/factories/strata/strata_test_case_factory.rb` already works around this
 with `find_or_create_by!`.
 
+**D6 — the retention decision (0.1) supersedes the spec's default.** Spec §8.1
+still specifies a 90-day `retention_period` and §11.1 still calls retention a
+Phase 2 merge blocker. Both are now wrong: the default is `nil` and the prune
+task ships disabled, so nothing is blocked and nothing is deleted until a host
+opts in. Correct both sections.
+
 ---
 
-## Phase 0 — Decisions to close
+## Phase 0 — Decisions (closed 2026-09-15)
 
-No code. These are the team's calls, and two of them gate later phases.
+All four are answered. **Nothing in this plan is blocked.** Phase 2 was gated on
+0.1 and Phase 3 on 0.3; both are resolved. Phase 1 was never gated and can start
+now.
 
-| # | Decision | Gates | Spec |
+| # | Question | Decision | What it changed |
 | --- | --- | --- | --- |
-| 0.1 | Retention period and encryption-at-rest for `strata_events.payload`. The 90-day default is a placeholder. A prune task that deletes records a benefits program must retain is worse than no prune task. | **Blocks Phase 2 merge** | §11.1 |
-| 0.2 | Does a permanent, framework-written payload store reopen [audit-log-pii-redaction.md](../../decisions/audit-log-pii-redaction.md)? That ADR rests on caller discipline, which does not transfer when the SDK's own callbacks compose the payload. | Should precede Phase 2; record as an ADR update either way | §11.2 |
-| 0.3 | Does `retryable: false` per step ship with Phase 3? Without it, a host cannot mark a step as dead-letter-on-first-failure. | **Blocks Phase 3** | §11.3 |
-| 0.4 | What queue backend do hosts run, and what does the dummy app use? Nothing is configured today. Affects whether Phase 3 can be exercised outside the `:test` adapter. | Blocks 3.8 | — |
+| 0.1 | Retention and encryption for `strata_events.payload`, with the policy unconfirmed | **Ship the prune task, disabled by default.** `retention_period` defaults to `nil`; a host opts in by setting it | The mechanism gets reviewed in Phase 2 without a default that could delete wrongly. No longer gates Phase 2 — a `nil` default cannot delete a record someone must keep |
+| 0.2 | Does a framework-written payload store reopen [audit-log-pii-redaction.md](../../decisions/audit-log-pii-redaction.md)? | **Decide at Phase 2 review**, not up front | Added to the Phase 2 review agenda in [2.9](#29-documentation) so it is a checklist item rather than something that quietly lapses |
+| 0.3 | Does `retryable: false` per step ship with Phase 3? | **Yes, in scope** | Promoted from open question to work item [3.5](#35-per-step-retryable-false) |
+| 0.4 | What queue backend? | **Adapter-agnostic.** The engine declares none; hosts choose. Dummy app uses the `:test` adapter | [3.9](#39-dummy-app-queue-backend) is now small and concrete: no gem, no engine opinion |
+
+**Still open, but blocking nothing.** The actual retention obligation needs an
+owner before any host enables pruning, and encryption-at-rest for `payload`
+remains undecided. Both are deferred, not resolved — the `nil` default is what
+makes deferring them safe.
 
 ---
 
@@ -200,7 +213,7 @@ about timing changes for hosts. Satisfies the "replayable history" half of the
 intent at low risk, and proves out the payload work before anything depends
 on it.
 
-**Gated by 0.1.**
+0.1 is decided (Phase 0), so nothing here is gated.
 
 ### 2.1 Spike: after-commit hooks under transactional fixtures
 
@@ -359,12 +372,14 @@ precedent in the engine, `app/services/strata/task_service.rb:14`. There is no
 `durable` auto-disables with a one-time warning when the tables are absent, so a
 host that upgrades the gem before running the migration keeps working (NFR-3).
 
-**Retention default is a placeholder pending 0.1.**
+**`retention_period` defaults to `nil`, not `90.days`** (0.1). Nothing is pruned
+until a host sets it deliberately.
 
 **Files.** `app/lib/strata/events.rb`.
 
-**Tests first.** Defaults; the tables-absent fallback warns exactly once and
-leaves `durable?` false.
+**Tests first.** Defaults — including that `retention_period` is `nil` out of
+the box; the tables-absent fallback warns exactly once and leaves `durable?`
+false.
 
 **Spec.** §5.8.
 
@@ -399,8 +414,17 @@ still passes unchanged.
 Backed by the model scopes from 2.4, per the data-modeling guideline that
 queries live in scopes.
 
+Per 0.1, `prune` is **a no-op with a clear message when `retention_period` is
+`nil`** — it must say it did nothing and why, not exit silently. A prune task
+that quietly does nothing is its own trap, and the deliberate-opt-in design
+means that is the default state every host starts in.
+
 **Files.** `lib/tasks/strata_events.rake`,
 `spec/lib/tasks/strata_events_spec.rb`.
+
+**Tests first.** Prune with `retention_period` set deletes only rows older than
+the cutoff; prune with it `nil` deletes nothing and reports why; an explicit
+`[days]` argument overrides the configured value.
 
 **Spec.** §5.9, §8.1.
 
@@ -415,7 +439,14 @@ bash block).
 > Note: `docs/generators.md` currently omits `strata:audit_log` and
 > `strata:determination` entirely. Worth fixing separately — not this work.
 
-Also fold the D1–D5 corrections back into `spec.md`.
+Also fold the D1–D6 corrections back into `spec.md`.
+
+**Phase 2 review agenda.** Per 0.2, closing the audit-log PII ADR question is an
+explicit item on the Phase 2 review, not an afterthought. The reviewer should
+come out of it with one of: an ADR update reopening the redaction decision, or a
+recorded judgement that caller discipline extends to framework-composed
+payloads. Either is fine; leaving it undecided is not, because the payload store
+ships in this phase.
 
 ---
 
@@ -423,7 +454,7 @@ Also fold the D1–D5 corrections back into `spec.md`.
 
 Delivery moves to ActiveJob. **This is where behavior changes for hosts.**
 
-**Gated by 0.3 and 0.4.**
+0.3 and 0.4 are decided (Phase 0), so nothing here is gated.
 
 ### 3.1 Durable vs. legacy subscriber split
 
@@ -495,7 +526,36 @@ fails today** because of 1.1, so it is the regression guard for that fix.
 
 **Spec.** §5.6, §11.3.
 
-### 3.5 Replay
+### 3.5 Per-step `retryable: false`
+
+**What.** A step can declare that it must not be retried, so a delivery that
+fails dead-letters on the first failure instead of running the callback again.
+This is the main structural guard against the duplicate-payment risk: a
+`SystemProcess` callback that issues a payment and fails *after* the external
+call but before commit will otherwise be retried, and the transaction rolls back
+the database but not the HTTP request that already happened.
+
+Add a `retryable:` option to the step helpers in
+`app/models/strata/business_process_builder.rb` (`system_process`, `staff_task`,
+`applicant_task`, `third_party_task`), defaulting to `true` so nothing changes
+for existing definitions. `Strata::Step` carries the flag; the delivery job
+reads it and skips `retry_on` for a non-retryable step.
+
+**Files.** `app/models/strata/business_process_builder.rb`,
+`app/models/concerns/strata/step.rb`, `app/models/strata/system_process.rb`,
+`app/jobs/strata/event_delivery_job.rb`.
+
+**Tests first.** A retryable step that raises retries then dead-letters; a
+`retryable: false` step that raises dead-letters immediately with `attempts` at
+1; the default is retryable when the option is omitted; the flag survives a
+business process definition round trip.
+
+**Acceptance.** A host can mark a step non-idempotent and trust it will not be
+called twice by the retry machinery.
+
+**Spec.** §11.3 (decision 0.3).
+
+### 3.6 Replay
 
 **What.** `strata:events:replay[delivery_id]` and
 `strata:events:replay_dead[event_name]` (FR-5). Rake-only — replay re-executes
@@ -505,7 +565,7 @@ entry.
 
 **Spec.** §5.9, §8.2.
 
-### 3.6 Test helpers
+### 3.7 Test helpers
 
 **What.** Ship `Strata::Events::TestHelpers` so host apps have a supported
 migration path rather than each inventing one. It ships from the gem alongside
@@ -520,7 +580,7 @@ has no ActiveJob configuration at all.
 
 **Spec.** §7.
 
-### 3.7 Migrate the SDK's own specs
+### 3.8 Migrate the SDK's own specs
 
 **What.** Update every spec that assumes synchronous delivery. Per D5 this is
 wider than spec §7 lists — start from the full list there and re-grep before
@@ -543,13 +603,19 @@ expose.
 
 **Spec.** §7.
 
-### 3.8 Dummy app queue backend
+### 3.9 Dummy app queue backend
 
 **What.** No queue adapter is configured in any environment and no
-background-job gem is in `Gemfile` or `strata.gemspec` (D4). Decide per 0.4 and
-configure the dummy app so Phase 3 can be exercised outside the `:test` adapter.
+background-job gem is in `Gemfile` or `strata.gemspec` (D4). Per 0.4 the engine
+stays **adapter-agnostic** — it declares no backend and adds no gem; hosts
+choose their own. Wire the `:test` adapter into `spec/rails_helper.rb` alongside
+the 3.7 helpers so the suite can run.
 
-### 3.9 Upgrade notes
+**Limitation, stated plainly:** Phase 3 cannot then be exercised against a real
+queue locally — only in a host app that has one. Anyone validating the retry and
+dead-letter behavior end to end needs to do it somewhere with a real backend.
+
+### 3.10 Upgrade notes
 
 **What.** The upgrade path (spec §10), with step 5 the most prominent line:
 
@@ -582,38 +648,37 @@ configure the dummy app so Phase 3 can be exercised outside the `:test` adapter.
 
 ## Sequencing
 
+Phase 0 is closed, so nothing below waits on a decision.
+
 ```
-0.1 ──────────────┐
-0.2 ─┐            │
-     │            ▼
-1.1 ─┴─► 1.2 ─► 1.3 ─► 1.4 ─► [Phase 1 ships]
-                                    │
-                    2.1 ◄───────────┘   (spike first — can invalidate 2.7)
-                     │
-       ┌─────────────┼─────────────┬──────────┐
-       ▼             ▼             ▼          ▼
-     2.2 ─► 2.3    2.5           2.6        (2.4 needs 2.3)
-       └──────┴─────►2.4 ─► 2.7 ─► 2.8 ─► 2.9 ─► [Phase 2 ships]
+1.1 ─► 1.2 ─► 1.3 ─► 1.4 ─────────────────────► [Phase 1 ships]
                                                       │
-0.3, 0.4 ─────────────────────────────────────────────┤
+                          2.1 ◄───────────────────────┘
+                           │   (spike first — a negative result invalidates 2.7)
+       ┌───────────────────┼───────────────────┐
+       ▼                   ▼                   ▼
+   2.2 ─► 2.3             2.5                 2.6
+       └────┴──────► 2.4 ─► 2.7 ─► 2.8 ─► 2.9 ─► [Phase 2 ships]
+                                                      │
                                                       ▼
-                             3.1 ─► 3.2 ─► 3.3 ─► 3.4 ─► 3.5
-                              └─► 3.6 ─► 3.7    3.8 ─► 3.9
+   3.1 ─► 3.2 ─► 3.3 ─► 3.4 ─► 3.5 ─► 3.6 ─────► [Phase 3 ships]
+    └──► 3.7 ─► 3.8              3.9 ─► 3.10
 ```
 
 Parallelizable: 2.2/2.3 (migration), 2.5 (serialization) and 2.6 (config) are
-independent once 2.1 answers. 3.6 can start as soon as 3.1 lands.
+independent once 2.1 answers. 3.7 can start as soon as 3.1 lands, and 3.9 is
+independent of the whole 3.1–3.6 chain.
 
 ## Risks
 
 | Risk | Phase | Mitigation |
 | --- | --- | --- |
-| Retries double-fire external side effects — a duplicate payment or notice | 3 | 0.3 decision, idempotency docs, low `max_attempts`, prominent upgrade note. **The sharpest risk in this work** (§11.3) |
-| Retention default deletes records that must be kept | 2 | 0.1 blocks the merge |
+| Retries double-fire external side effects — a duplicate payment or notice | 3 | **3.5 ships the per-step `retryable: false` opt-out** (decision 0.3), plus idempotency docs, low `max_attempts`, and a prominent upgrade note. **Still the sharpest risk in this work** (§11.3) |
+| Prune deletes records that must be kept | 2 | Decision 0.1 — `retention_period` defaults to `nil`, so pruning is opt-in and cannot fire unreviewed |
 | After-commit hooks do not fire under transactional fixtures | 2 | 2.1 spike, first |
 | Silent no-ops become visible and the first `no_match` counts look alarming | 2 | Warn teams in advance; it is the first honest measurement, not a regression (§11.4) |
 | Phase 1 surfaces failures hosts already had | 1 | 1.4 release notes (§11.5) |
-| Async breaks host specs in ways we cannot see from here | 3 | 3.6 ships helpers with the change rather than leaving hosts to invent them |
+| Async breaks host specs in ways we cannot see from here | 3 | 3.7 ships helpers with the change rather than leaving hosts to invent them |
 
 ## Definition of done
 
@@ -624,11 +689,14 @@ where a case advanced without its step running; characterization test on
 **Phase 2** — generator installs both tables with a passing generator spec; the
 dummy app is migrated via `db:migrate` (never by editing `schema.rb`); publish
 writes rows inside the caller's transaction; rollback leaves nothing behind;
-delivery timing is unchanged and every existing spec passes untouched; retention
-decided; docs updated; `make lint` and `make test` green.
+delivery timing is unchanged and every existing spec passes untouched;
+`retention_period` defaults to `nil` and prune is a reported no-op without it;
+the audit-log PII ADR question is closed at review (0.2); docs updated;
+`make lint` and `make test` green.
 
 **Phase 3** — a subscriber is registered down exactly one path; the same
 delivery applied twice produces one effect; a raising subscriber retries then
-dead-letters; replay works from rake; test helpers ship; every SDK spec migrated;
-`Strata::Events.durable` defaults **off** for at least one release; upgrade notes
-carry the idempotency warning; `make lint` and `make test` green.
+dead-letters; a `retryable: false` step dead-letters on its first failure
+instead of retrying; replay works from rake; test helpers ship; every SDK spec
+migrated; `Strata::Events.durable` defaults **off** for at least one release;
+upgrade notes carry the idempotency warning; `make lint` and `make test` green.
