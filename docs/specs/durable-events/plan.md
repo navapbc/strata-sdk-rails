@@ -11,6 +11,13 @@ out of Phase 1, and settled four decisions in §13. Everything it forced on this
 plan is listed in
 [What the amended spec changed here](#what-the-amended-spec-changed-here).
 
+**Five further questions were settled the same day** and are now recorded in
+§13: the `no_match` mechanism, the retention default, target resolution timing,
+`retryable: false`, and `publish`'s return value. **Nothing in this plan is
+blocked on a design question any more** — Phase 2's merge gate is lifted and
+Phase 1's caveat is closed. What remains open needs a named owner rather than a
+decision; see [Phase 0](#phase-0--decisions).
+
 ## Date
 
 2026-09-15, revised 2026-09-17
@@ -61,16 +68,16 @@ Nine things. The first is the largest, and it inverts what Phase 1 does.
 | 8 | **§11.2 answered the audit-log ADR question** and dropped `payload_filter` for identifier-only payloads enforced in development and test | **Closes decision 0.2**, differently than this plan had it. New item [2.5a](#25a-identifier-only-payload-enforcement) replaces a review-agenda item |
 | 9 | **§9.2 withdrew "Phase 2 is behavior-free"** and §10 gained a pre-flight check | Phase 2's framing and its definition of done are corrected; `check_payloads` lands in [2.8](#28-operator-rake-tasks--status-prune-and-check_payloads) and runs *before* the phase |
 
-Two things the amendment did **not** change, and both matter:
+Two things the amendment left disagreeing with this plan, **both since
+resolved in the spec's favour of this plan's position**:
 
-- **Retention is still gated.** §5.8 still defaults `retention_period` to
-  `90.days`, §8.1 still calls that a placeholder, §11.1 still says the policy
-  owner confirms **before Phase 2 merges**, and §13 does not record decision
-  0.1. So 0.1 is reopened here — see [Phase 0](#phase-0--decisions) and
-  [D6](#deltas-from-the-spec).
-- **`retryable: false` is still open** (§12 question 3, §11.3 "recommended, and
-  not yet designed"). This plan's decision 0.3 is ahead of the spec, not
-  reflected in it.
+- **Retention.** §5.8 defaulted `retention_period` to `90.days` while §11.1
+  made the policy owner's sign-off a Phase 2 merge blocker. Settled 2026-09-17:
+  the default is `nil`, pruning is opt-in, and §11.1 no longer gates the merge.
+  This plan's 0.1 recommendation is now the spec's position.
+- **`retryable: false`.** §12 had it open and §11.3 called it "not yet
+  designed" while this plan had it in scope. Settled: it ships with Phase 3,
+  §11.3 now carries what is left to design, and §9.3 names it.
 
 ---
 
@@ -153,21 +160,14 @@ files the spec names, this also touches
 `spec/factories/strata/strata_test_case_factory.rb` already works around this
 with `find_or_create_by!`.
 
-**D6 — the spec contradicts itself on retention, and did not adopt this plan's
-answer.** §5.8 sets `retention_period = 90.days`; §8.1 calls that a
-placeholder and points at §11.1; §11.1 says do not ship it unreviewed and makes
-the policy owner's confirmation a **Phase 2 merge blocker**; §12 question 1
-still lists retention as open; and §13 does not record a decision. This plan
-previously claimed the question was closed with a `nil` default. It is not
-closed in the document of record.
-
-The engineering recommendation stands and is worth putting to the reviewer:
-**default `retention_period` to `nil` and ship the prune task disabled.** A
-`nil` default cannot delete a record someone is legally required to keep, which
-is the specific harm §11.1 is protecting against, so adopting it converts a
-merge blocker into an ordinary open question. But until §5.8, §8.1 and §11.1
-are amended to say so, Phase 2 is gated — see
-[Phase 0](#phase-0--decisions).
+**D6 — resolved 2026-09-17; kept for the record.** §5.8 set
+`retention_period = 90.days` while §11.1 made the policy owner's confirmation a
+**Phase 2 merge blocker**, so the spec gated a phase on an answer engineering
+cannot produce. §5.8, §8.1 and §11.1 now carry the `nil` default and opt-in
+pruning this plan recommended, and §11.1 gates a host enabling pruning instead
+of gating the merge. Nothing to fix; noted because the reasoning is the reason
+[2.8](#28-operator-rake-tasks--status-prune-and-check_payloads) must report
+that it pruned nothing rather than exiting silently.
 
 **D7 — `id: :uuid` alone does not match house style.** Spec §5.2 writes
 `create_table :strata_events, id: :uuid`. Every table in
@@ -211,29 +211,46 @@ as though the router is reaching into a private API, and because the ineffective
 
 ## Phase 0 — Decisions
 
-Two of the four are settled. **Phase 2 is gated on 0.1 again**; Phase 1 was
-never gated and can start now, with one caveat noted below.
+**All four are settled, and no phase is gated on a design question.**
 
 | # | Question | State | Notes |
 | --- | --- | --- | --- |
-| 0.1 | Retention and encryption for `strata_events.payload` | **Reopened by the amended spec.** §11.1 still makes the policy owner's confirmation a Phase 2 merge blocker, and §13 does not record a decision | This plan's earlier answer — `nil` default, prune shipped disabled — is a sound way to close it and is carried as a recommendation in [D6](#deltas-from-the-spec). It needs to land in §5.8, §8.1 and §11.1 before Phase 2 can merge. Until then, treat [2.6](#26-configuration-module) and [2.8](#28-operator-rake-tasks--status-prune-and-check_payloads) as blocked at the merge, not at the keyboard |
+| 0.1 | Retention and encryption for `strata_events.payload` | **Closed 2026-09-17, in the spec.** `retention_period` defaults to `nil`; pruning is opt-in; §11.1 is no longer a Phase 2 merge blocker | The `nil` default is now §5.8's, so [2.6](#26-configuration-module) and [2.8](#28-operator-rake-tasks--status-prune-and-check_payloads) can be written and merged. The retention *obligation* and encryption-at-rest are still open and still need the data-policy owner — but they now block a **host enabling pruning**, not this work. Say so in the upgrade notes ([3.10](#310-upgrade-notes)) |
 | 0.2 | Does a framework-written payload store reopen [audit-log-pii-redaction.md](../../decisions/audit-log-pii-redaction.md)? | **Closed by the spec.** §11.2 answers it: separate features, that ADR does not govern this one, and `payload_filter` is dropped | Closed differently than this plan had it — there is no longer a Phase 2 review-agenda item, there is a **work item**: [2.5a](#25a-identifier-only-payload-enforcement), the development-and-test check that makes NFR-7 real |
-| 0.3 | Does `retryable: false` per step ship with Phase 3? | **Decided here, not in the spec.** §12 question 3 still lists it open and §11.3 calls it "not yet designed" | [3.5](#35-per-step-retryable-false) stays in scope. Fold the decision into §11.3 and strike question 3, or drop the item — but do not leave the two documents disagreeing |
+| 0.3 | Does `retryable: false` per step ship with Phase 3? | **Yes, and the spec now says so too.** §11.3 and §9.3 name it, and §12 no longer lists it | [3.5](#35-per-step-retryable-false) is in scope. §11.3 now carries the design sketch this plan's item was ahead of, so the two documents agree |
 | 0.4 | What queue backend? | **Superseded by the amended spec.** NFR-4 requires a *durable* backend, §5.8 refuses to boot on `:async`/`:inline`/`:test`-outside-test, and §13 prefers a same-database backend | "Adapter-agnostic" survives only in the narrow sense that the engine ships no queue gem and hosts choose. It is no longer indifferent: it refuses adapters, prefers Solid Queue or GoodJob, and requires the FR-11 sweeper regardless. [3.9](#39-dummy-app-queue-backend) is rewritten |
 
-**One caveat on Phase 1.** [1.3](#13-report-an-outcome-from-transition_to_next_step)
-implements §6.4, and §12 question 10 records the mechanism as **not settled** —
-returning `:transitioned`/`:no_match` changes the return value of two SDK
-methods a host business process could be calling directly. It is a cheap
-question to close (the alternative, a `NoMatchingTransition` exception, is
-argued and rejected in §5.6a), but it should be closed at Phase 1 review rather
-than discovered later. Nothing else in Phase 1 depends on the answer, so 1.1,
-1.2, 1.4 and 1.5 can proceed either way.
+Two more questions this plan flagged were closed the same day and are recorded
+in §13:
 
-**Still open, and now explicitly so.** The actual retention obligation needs an
-owner, encryption-at-rest for `payload` remains undecided, and §12 questions 9
-and 10 — target resolution timing and the `no_match` mechanism — are both
-unsettled design positions this plan builds on.
+- **The `no_match` mechanism** (§13) — return value, not a
+  `NoMatchingTransition` exception. This was the only thing gating Phase 1;
+  [1.3](#13-report-an-outcome-from-transition_to_next_step) can proceed as
+  written.
+- **Target resolution timing** (§13) — publish time. So
+  [2.4b](#24b-target-resolution-router) exists as specified, and `target_key`
+  keeps its uniqueness role.
+
+Two were answered from the code rather than decided, and both removed work
+rather than adding it:
+
+- **`publish` can return the `Strata::Event`** (§13). None of the
+  twelve `EventManager.publish` call sites in the engine, the dummy app or the
+  suite reads the current return value, so [2.7](#27-publish-writes-rows) needs
+  no compatibility shim and no confirmation step.
+- **`rake strata:events:publish_case_event` has no user in this repo** (§6.5,
+  and §12 narrows to host usage) — no caller outside the task, no doc, and a
+  spec
+  that only checks argument validation against a stubbed `EventManager`, which
+  is why §6.5's no-op went unnoticed. If no host calls it, delete it rather
+  than carry it through Phase 3.
+
+**Still open, and none of it blocks a phase.** Four things now need a named
+owner rather than a decision: the retention obligation, encryption-at-rest for
+`payload`, who watches the `no_match` number (§11.4), and how long
+`legacy_publish` lives. The first two gate a host turning pruning on; the third
+decides whether the diagnostic this work adds is read by anyone; the fourth is
+the only path by which FR-6 becomes unconditional.
 
 ---
 
@@ -366,8 +383,9 @@ any one moved; `handle_event` with an empty `for_event` result returns
 
 **Acceptance.** A caller can tell a no-op from applied work.
 
-**Spec.** §6.4, §5.6a. **Open.** §12 question 10 — the return-value mechanism
-is the spec's position, not a confirmed decision. Close it at Phase 1 review.
+**Spec.** §6.4, §5.6a, §13 — the return-value mechanism is settled, so this
+item's contract is fixed. The rejected alternative, a `NoMatchingTransition`
+exception, is argued in §5.6a; do not reintroduce it at review.
 
 ### 1.4 Pin the symbol-key contract in `Case.for_event`
 
@@ -671,9 +689,11 @@ two start-event deliveries for one (event, subscriber) violate the unique
 index; the router sees unserialized symbol keys and so depends on
 [1.4](#14-pin-the-symbol-key-contract-in-casefor_event).
 
-**Spec.** §5.5a. **Open.** §12 question 9 — resolving targets at publish time
-rather than delivery time is the spec's position, not a confirmed decision. A
-case created between publish and delivery receives nothing.
+**Spec.** §5.5a, §13 — publish-time resolution is settled, so this item exists
+as specified. One consequence is now an accepted cost rather than an open
+question: **a case created between publish and delivery receives nothing.**
+That is fine for transition events, which key on a case that already exists,
+and it is why start events resolve no target at all.
 
 ### 2.5 Payload serialization
 
@@ -776,10 +796,11 @@ they asked for.
 `stranded_after` defaults to 5 minutes: longer than a normal pending-to-running
 transition, short enough that a deploy-time loss is recovered within one sweep.
 
-**`retention_period` is where 0.1 lands.** §5.8 says `90.days`; §8.1 calls that
-a placeholder; §11.1 says do not ship it unreviewed. The recommendation in
-[D6](#deltas-from-the-spec) is `nil`. Do not write either value until 0.1 is
-closed — this is the one line in Phase 2 that a wrong default makes destructive.
+**`retention_period` defaults to `nil`** (0.1, §5.8). Pruning is opt-in, so
+nothing is deleted until a host sets it deliberately — which is what took this
+line off Phase 2's merge gate. It is still the one line in Phase 2 that a wrong
+default makes destructive, so the test asserting the default is `nil` is not
+box-ticking.
 
 **Files.** `app/lib/strata/events.rb`.
 
@@ -796,8 +817,9 @@ adapter refuses to boot; the same on `:test` inside the test environment does
 inserts the event and its pending deliveries (via
 [2.4b](#24b-target-resolution-router)) inside the caller's transaction, and
 registers the enqueue for after commit. Returns the `Strata::Event` instead of
-`nil` — additive, since the previous return value was the `instrument` result,
-which no caller uses. Confirm that during implementation (§12 question 4).
+`nil` — confirmed additive rather than assumed: none of the twelve
+`EventManager.publish` call sites in the engine, the dummy app or the suite
+reads the current return value, which is the `instrument` result.
 
 This is what fixes the `after_create`/rollback hazard: `ApplicationForm` and
 `Task` publish from `after_create`/`after_update`, which run *inside* the
@@ -844,11 +866,11 @@ claimant's failed submission. **§10 puts it before this phase, not after** —
 ship it with Phase 2 and document it as step 3 of the upgrade.
 
 `prune` deletes `strata_events` rows and relies on the cascade from
-[2.2](#22-migration-generator) to take their deliveries. Per the 0.1
-recommendation it must be **a no-op with a clear message when
-`retention_period` is `nil`** — it must say it did nothing and why, not exit
-silently. A prune task that quietly does nothing is its own trap, and the
-opt-in design means that is the default state every host starts in.
+[2.2](#22-migration-generator) to take their deliveries. Per 0.1 it must be
+**a no-op with a clear message when `retention_period` is `nil`** — it must say
+it did nothing and why, not exit silently. A prune task that quietly does
+nothing is its own trap, and opt-in pruning means that is the state every host
+starts in.
 
 **Files.** `lib/tasks/strata_events.rake`,
 `spec/lib/tasks/strata_events_spec.rb`.
@@ -874,9 +896,9 @@ operator tasks. Add it to `docs/README.md`. Add `strata:events` to
 > Note: `docs/generators.md` currently omits `strata:audit_log` and
 > `strata:determination` entirely. Worth fixing separately — not this work.
 
-Also fold the [D1–D9](#deltas-from-the-spec) corrections back into `spec.md`,
-along with decision 0.3 (§11.3 and §12 question 3) and whichever way 0.1 is
-settled (§5.8, §8.1, §11.1).
+Also fold the outstanding [D1–D9](#deltas-from-the-spec) corrections back into
+`spec.md` — D6 is already done, and D1's generator-name discrepancy (§10 step
+2) should go with whichever name 2.2 ships.
 
 **No PII review-agenda item.** §11.2 answered 0.2: the audit-log ADR does not
 govern this feature, and the control is
@@ -1112,8 +1134,10 @@ business process definition round trip.
 **Acceptance.** A host can mark a step non-idempotent and trust it will not be
 called twice by the retry machinery.
 
-**Spec.** §11.3 (decision 0.3 — **decided here, still open in §12 question 3**;
-fold it into the spec or drop this item).
+**Spec.** §11.3, §9.3, §13 — in scope for Phase 3. §11.3 carries the design
+sketch (the `retryable:` option across the four step helpers, the flag on
+`Strata::Step`, first-failure dead-lettering in the job); this item implements
+it.
 
 ### 3.6 Replay
 
@@ -1234,6 +1258,12 @@ things this plan adds to it rather than restating:
 - **Add the deployment note from §5.10**, which §10 omits: the worker must boot
   the **same application**, or `subscriber_key` constantizes to nothing and
   resolves no subscriber.
+- **Add a retention step**, which §10 also omits. `retention_period` defaults
+  to `nil` deliberately (0.1) and pruning stays off until a host sets it. Say
+  that the value is a **retention obligation, not a disk-space preference**,
+  and that §11.1's questions — the obligation itself, and encryption at rest —
+  are answered before it is set, not after. This is the one place the open
+  policy question can still do harm.
 
 **Spec.** §10, §5.10, §11.3.
 
@@ -1268,8 +1298,7 @@ things this plan adds to it rather than restating:
 
 ## Sequencing
 
-Phase 1 can start now. Phase 2 can be built but **cannot merge until 0.1 is
-closed** (§11.1).
+Phase 1 can start now, and with 0.1 closed **no phase waits on a decision**.
 
 ```
 Phase 1   1.1 ══ 1.2  ──►  1.3  ──►  1.4  ──►  1.5  ──►  [Phase 1 ships]
@@ -1304,16 +1333,15 @@ after 3.3a** (its central test cannot pass while exceptions are swallowed).
 
 | Risk | Phase | Mitigation |
 | --- | --- | --- |
-| Retries double-fire external side effects — a duplicate payment or notice | 3 | [3.5](#35-per-step-retryable-false) ships the per-step `retryable: false` opt-out (decision 0.3, **not yet in the spec**), plus idempotency docs, a `max_attempts` the job actually reads (3.2), and step 4 of the upgrade notes. **Still the sharpest risk in this work** (§11.3) |
+| Retries double-fire external side effects — a duplicate payment or notice | 3 | [3.5](#35-per-step-retryable-false) ships the per-step `retryable: false` opt-out (0.1 settled it into §11.3 and §9.3), plus idempotency docs, a `max_attempts` the job actually reads (3.2), and step 4 of the upgrade notes. **Still the sharpest risk in this work** (§11.3), and 3.5 is the only item that prevents rather than mitigates it |
 | A deploy strands a committed delivery and nothing recovers it — FR-1 silently unmet | 3 | [3.2a](#32a-stranded-delivery-sweeper-fr-11), required rather than optional (§13). A host that does not schedule it does not have FR-1, which is why it is step 6 of the upgrade notes |
 | Start events resolve no target, so `durable = true` creates **zero cases for every new application** | 2 | [2.4b](#24b-target-resolution-router)'s explicit start branch, and the §7 test that asserts both the delivery row and the created case |
 | Serialization raises inside `after_create` and rejects a claimant's submission | 2 | `check_payloads` ([2.8](#28-operator-rake-tasks--status-prune-and-check_payloads)) runs **before** the phase reaches a host (§10 step 3); the identifier-only check ([2.5a](#25a-identifier-only-payload-enforcement)) fails in development, never in production |
-| Prune deletes records that must be kept | 2 | **Open — 0.1 is reopened.** The `nil`-default recommendation in [D6](#deltas-from-the-spec) is what closes it; until it lands in §5.8/§8.1/§11.1, Phase 2 is gated at the merge |
-| Phase 2 is built and cannot merge for a reason nobody owns | 2 | 0.1 needs a named policy owner now, not at the merge. This is a scheduling risk, not a technical one, and it is the only thing currently blocking a phase |
+| Prune deletes records that must be kept | 2 | 0.1 — `retention_period` defaults to `nil`, so pruning is opt-in and cannot fire unreviewed. The residual risk moves to the host: **the retention obligation must be answered before anyone sets it**, which is why it is in the upgrade notes ([3.10](#310-upgrade-notes)) rather than in the SDK's release gate |
+| A host enables pruning against an obligation nobody has confirmed | — | The one place the open policy question can still cause harm. Needs a named data-policy owner, and needs the upgrade notes to say plainly that `nil` is deliberate and not a value to fill in casually |
 | After-commit hooks do not fire under transactional fixtures | 2 | [2.1](#21-spike-after-commit-hooks-under-transactional-fixtures) spike, first |
 | Silent no-ops become visible and the first `no_match` counts look alarming | 2 | Warn teams in advance; it is the first honest measurement, not a regression (§11.4). §12 question 7 asks who owns the number — without an owner the diagnostic argument for recording it evaporates |
 | Phase 1 surfaces failures hosts already had | 1 | [1.5](#15-release-notes-for-phase-1) release notes, framed so hosts do not brace for rejected submissions a release early (§11.5) |
-| The §6.4 return-value contract is unsettled while Phase 1 implements it | 1 | §12 question 10 closed at Phase 1 review; nothing else in Phase 1 depends on the answer |
 | Async breaks host specs in ways we cannot see from here | 3 | [3.7](#37-test-helpers) ships helpers with the change rather than leaving hosts to invent them |
 
 ## Definition of done
@@ -1321,8 +1349,8 @@ after 3.3a** (its central test cannot pass while exceptions are swallowed).
 **Phase 1** — no `rescue Exception` in `business_process_instance.rb`; a raising
 step leaves the domain write saved and the case **not** advanced; no state where
 a case advanced without its step running; `transition_to_next_step` and
-`handle_event` return `:transitioned`/`:no_match`; characterization test on
-`for_event`; the boundary rescue carries a comment naming §6.1 as temporary;
+`handle_event` return `:transitioned`/`:no_match` (and nothing raises
+`NoMatchingTransition`); characterization test on `for_event`; the boundary rescue carries a comment naming §6.1 as temporary;
 release notes written; `make lint` and `make test` green.
 
 **Phase 2** — generator installs both tables with a passing generator spec,
@@ -1335,8 +1363,9 @@ existing spec — including `publish_event_with_payload` — passes untouched; a
 non-serializable payload raises at publish and leaves no event row;
 `check_payloads` reports it; the identifier-only check fails in development and
 not in production; prune succeeds on an event that still has deliveries;
-`retention_period` carries whichever default 0.1 settles on, with §5.8, §8.1 and
-§11.1 amended to match; docs updated; `make lint` and `make test` green.
+`retention_period` defaults to `nil` and prune is a **reported** no-op without
+it; docs updated and they state that `nil` is deliberate; `make lint` and
+`make test` green.
 
 **Phase 3** — a subscriber is registered down exactly one path and fires once;
 the same delivery applied twice produces one effect; two jobs on one case
