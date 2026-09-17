@@ -143,12 +143,26 @@ RSpec.describe Strata::EventManager do
       expect(TestCase.where(application_form_id: form.id)).to be_empty
     end
 
-    it 'logs the failure' do
+    # Logged twice on purpose, with different context each time: the step logs
+    # the step name and case id, the publish boundary logs the event name.
+    it 'logs the failure at the step, naming the case' do
+      allow(Rails.logger).to receive(:error)
+
+      form = TestApplicationForm.create!
+      kase_id = TestCase.unscoped.where(application_form_id: form.id).pick(:id)
+
+      expect(Rails.logger).to have_received(:error)
+        .with(/start blew up/).at_least(:once)
+      expect(kase_id).to be_nil
+    end
+
+    it 'logs the failure at the publish boundary, naming the event' do
       allow(Rails.logger).to receive(:error)
 
       TestApplicationForm.create!
 
-      expect(Rails.logger).to have_received(:error).with(/start blew up/)
+      expect(Rails.logger).to have_received(:error)
+        .with(/TestApplicationFormCreated/).at_least(:once)
     end
   end
 end

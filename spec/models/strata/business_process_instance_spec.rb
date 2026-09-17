@@ -109,6 +109,38 @@ RSpec.describe Strata::BusinessProcessInstance do
       end
     end
 
+    # The rollback above has to survive being nested inside the caller's
+    # transaction, because that is the only way it ever runs in production:
+    # publish is called from after_create/after_update, not after_commit. A
+    # nested `transaction` without requires_new: true joins the outer one
+    # instead of opening a savepoint, so the step change would commit anyway
+    # and the fix would pass its own specs while doing nothing.
+    context 'when the step raises inside an enclosing transaction' do
+      before do
+        allow(business_process.steps['system_process'])
+          .to receive(:execute).and_raise(StandardError, 'step blew up')
+      end
+
+      it 'still rolls the step change back' do
+        TestCase.transaction do
+          expect { instance.transition_to_next_step(event('event1')) }
+            .to raise_error(StandardError)
+        end
+
+        expect(kase.reload.business_process_current_step).to eq('staff_task')
+      end
+
+      it 'leaves the enclosing transaction free to commit its own work' do
+        TestCase.transaction do
+          kase.update!(facts: { 'touched' => true })
+          expect { instance.transition_to_next_step(event('event1')) }
+            .to raise_error(StandardError)
+        end
+
+        expect(kase.reload.facts).to eq({ 'touched' => true })
+      end
+    end
+
     # rescue Exception currently absorbs these, so a step resists Ctrl-C and
     # swallows the very deploy-time termination signal this work exists to
     # survive. Neither is a StandardError, so neither should be logged and

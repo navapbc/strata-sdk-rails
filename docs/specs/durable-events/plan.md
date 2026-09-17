@@ -298,9 +298,25 @@ safe alone** — see the note at the end of this item.
 the same treatment.
 
 Use `Strata::AuditLog.record` (`app/models/strata/audit_log.rb:59-65`) as the
-house pattern for a transaction wrapping caller work. Take a row lock on the
-case per the aggregate-root guidance in
+house pattern for a transaction wrapping caller work.
+
+**The transaction needs `requires_new: true`.** Events are published from
+`after_create`/`after_update` and subscribers run inline, so in the path that
+matters this runs inside the caller's open transaction — and a nested
+`transaction` without it joins the outer one rather than opening a savepoint,
+so the rollback undoes nothing. The failure mode is nasty: a spec that calls
+`transition_to_next_step` directly gets a real transaction and passes, so the
+fix looks correct and does nothing in production. This is the same trap as the
+misleading `Strata::AuditLog` YARD note below.
+
+**No row lock in this phase.** An earlier revision of this item called for one
+per the aggregate-root guidance in
 [data-modeling-guidelines.md](../../contributing/data-modeling-guidelines.md).
+Deferred to [3.3](#33-idempotency-and-per-case-serialization): a lock changes
+concurrency behavior, which this phase is explicitly meant not to do, and
+FR-8's only test that proves a lock works — two concurrent jobs on one case —
+lands there. Shipping it here would mean shipping a line no test in this phase
+exercises.
 
 **Files.** `app/models/strata/business_process_instance.rb`.
 
