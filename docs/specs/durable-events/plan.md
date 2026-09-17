@@ -11,9 +11,11 @@ out of Phase 1, and settled four decisions in §13. Everything it forced on this
 plan is listed in
 [What the amended spec changed here](#what-the-amended-spec-changed-here).
 
-**Five further questions were settled the same day** and are now recorded in
-§13: the `no_match` mechanism, the retention default, target resolution timing,
-`retryable: false`, and `publish`'s return value. **Nothing in this plan is
+**Seven further questions were settled the same day.** Five are recorded in
+§13 — the `no_match` mechanism, the retention default, target resolution
+timing, `retryable: false`, and `publish`'s return value — and two more in the
+spec body: the generator is `strata:events` (D1, §10) and the dummy app
+configures Solid Queue ([3.9](#39-dummy-app-queue-backend), §5.8). **Nothing in this plan is
 blocked on a design question any more** — Phase 2's merge gate is lifted and
 Phase 1's caveat is closed. What remains open needs a named owner rather than a
 decision; see [Phase 0](#phase-0--decisions).
@@ -95,12 +97,12 @@ model shipped by the engine. That is exactly this case. The task generator is
 `NamedBase` and writes a model plus a migration only if the user accepts a
 prompt.
 
-Relatedly, the spec names the generator two ways: §5.2 implies `strata:events`
-while §10 step 2 says `rails generate strata:events_migration`. Both patterns
+Relatedly, the spec named the generator two ways — §5.2 implied
+`strata:events` while §10 step 2 said `strata:events_migration`. Both patterns
 exist in `lib/generators/strata/` (`audit_log` installs a migration under a
-bare name; `income_records_migration` carries the suffix). Recommend
-`strata:events`, matching the `audit_log` precedent D1 already points at, and
-correcting §10 to match. One of the two has to change.
+bare name; `income_records_migration` carries the suffix). **Settled:
+`strata:events`**, matching the `audit_log` precedent this delta already points
+at; §10 is corrected.
 
 **D2 — the DDL is off house style, but the cascade FK is not.** Spec §5.2
 writes `t.references :strata_event, null: false, type: :uuid, foreign_key: { on_delete: :cascade }`.
@@ -240,10 +242,17 @@ rather than adding it:
   no compatibility shim and no confirmation step.
 - **`rake strata:events:publish_case_event` has no user in this repo** (§6.5,
   and §12 narrows to host usage) — no caller outside the task, no doc, and a
-  spec
-  that only checks argument validation against a stubbed `EventManager`, which
-  is why §6.5's no-op went unnoticed. If no host calls it, delete it rather
-  than carry it through Phase 3.
+  spec that only checks argument validation against a stubbed `EventManager`,
+  which is why §6.5's no-op went unnoticed.
+
+  **Still open, deliberately, and it blocks nothing.** Whether a *host* calls
+  it is the one question here nobody in this repo can answer, and it is also
+  the one that answers itself if left alone: the task resolves no target, so
+  [2.4b](#24b-target-resolution-router) writes an `"unmatched"` delivery row
+  and it is recorded `no_match`, which means a host still running it finds out
+  from the mechanism this work adds. Worth asking whoever added it (`06ba5eb`,
+  Michael Crawford, 2025-06-09) before Phase 3 ships, and deleting rather than
+  porting it if nothing depends on it.
 
 **Still open, and none of it blocks a phase.** Four things now need a named
 owner rather than a decision: the retention obligation, encryption-at-rest for
@@ -467,7 +476,8 @@ different mechanism and the spec needs revising before any more work lands.
 
 ### 2.2 Migration generator
 
-**What.** `strata:events` generator installing both tables, modelled on
+**What.** `strata:events` generator (name settled — see D1) installing both
+tables, modelled on
 `lib/generators/strata/audit_log/audit_log_generator.rb` (D1):
 `Rails::Generators::Base`, `source_root File.expand_path("templates", __dir__)`,
 a `create_migration_file` writing a hand-rolled
@@ -897,8 +907,9 @@ operator tasks. Add it to `docs/README.md`. Add `strata:events` to
 > `strata:determination` entirely. Worth fixing separately — not this work.
 
 Also fold the outstanding [D1–D9](#deltas-from-the-spec) corrections back into
-`spec.md` — D6 is already done, and D1's generator-name discrepancy (§10 step
-2) should go with whichever name 2.2 ships.
+`spec.md`. D6 (retention) and D1's generator-name discrepancy (§10 step 2) are
+already done; D2, D3, D7 and D8 are the ones still to land, and D8 is the one
+that changes §9.2's phase boundary rather than just its detail.
 
 **No PII review-agenda item.** §11.2 answered 0.2: the audit-log ADR does not
 govern this feature, and the control is
@@ -1212,27 +1223,43 @@ For the suite, wire the `:test` adapter into `spec/rails_helper.rb` alongside
 the [3.7](#37-test-helpers) helpers — allowed by the deny-list's test-environment
 carve-out, and the reason that carve-out exists.
 
-**The dummy app cannot exercise Phase 3 against a real queue**, and the
-amendment makes that gap sharper rather than softer:
-`spec/dummy/config/environments/production.rb:73` leaves `queue_adapter`
-commented out, so the dummy app inherits `:async` and would now be **refused at
-boot** with `durable = true`. Two things follow, and both should be decided at
-Phase 3 review rather than left implicit:
+**And configure Solid Queue in `spec/dummy`.** Decided rather than left to
+Phase 3 review: `spec/dummy/config/environments/production.rb:73` leaves
+`queue_adapter` commented out, so the dummy app inherits `:async` and would be
+**refused at boot** under `durable = true` — the repo's only host app fails the
+requirement the repo is adding. Without a real backend here, retry,
+dead-lettering and FR-11 recovery are validated only in some host app that
+happens to have one, which is how a requirement becomes aspirational.
 
-1. Whether to configure a real backend in `spec/dummy` so the boot refusal, the
-   sweeper schedule, and the retry and dead-letter paths can be exercised end
-   to end. Solid Queue on the existing Postgres container is the cheapest
-   option and is also the configuration §13 prefers.
-2. If not, that retry, dead-lettering and FR-11 recovery are validated only in
-   a host app with a real backend — stated as a known gap, not discovered later.
+Concretely, and the first point is the one that matters:
 
-Recommend option 1: a `:solid_queue` adapter in `spec/dummy`'s development and
-production environments is a small change that makes NFR-4, §5.5b and §5.8
-testable instead of aspirational.
+- **The gem goes in the root `Gemfile`'s `:development, :test` group**,
+  alongside `pg`, `pundit` and `factory_bot_rails` — **not in
+  `strata.gemspec`.** There is no separate dummy Gemfile; the dummy app uses
+  the root one, which is exactly the seam that lets the dummy app have a queue
+  while the engine declares none. Putting it in the gemspec would make it a
+  hard dependency for every host and contradict NFR-4's "hosts choose".
+- Install Solid Queue's migration into `spec/dummy/db/migrate/` and let
+  `db:migrate` regenerate `schema.rb` (never edit it — CLAUDE.md hard rule).
+  Note this adds a substantial number of tables to a checked-in, reviewed
+  `schema.rb`; if that is unwelcome, GoodJob is the lighter-schema
+  same-database alternative and satisfies NFR-4 identically.
+- Set `config.active_job.queue_adapter = :solid_queue` in the dummy app's
+  development and production environments. Leave test on `:test`.
+- **Use Solid Queue's recurring tasks to schedule
+  [3.2a](#32a-stranded-delivery-sweeper-fr-11)**, which is the part that most
+  needs exercising: the sweeper is the mechanism carrying FR-1, and a scheduled
+  job that has never actually run on a schedule is not evidence of anything.
+
+Being a same-database backend, this also closes the FR-11 window outright in
+the dummy app (§5.5b) — so the stranded state has to be **constructed** in the
+test rather than waited for, which [3.2a](#32a-stranded-delivery-sweeper-fr-11)
+already calls for.
 
 **Tests first.** `durable = true` with `:async` refuses to boot; with `:test`
-inside the test environment it does not; if option 1 is taken, an end-to-end
-publish-to-delivery run against the real backend.
+inside the test environment it does not; an end-to-end publish-to-delivery run
+against Solid Queue; the sweeper recovers a delivery committed `pending` with
+no job enqueued.
 
 **Spec.** NFR-4, §5.8, §5.5b, §13.
 
