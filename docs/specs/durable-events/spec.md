@@ -893,7 +893,12 @@ draft rather than a refinement:
   is that host today — `spec/dummy/config/environments/production.rb:73` leaves
   `queue_adapter` commented out and therefore inherits `:async`. Refusing to
   boot is the only honest behavior, and it is what makes NFR-4 enforceable
-  rather than aspirational.
+  rather than aspirational. **The dummy app will configure Solid Queue on the
+  existing Postgres container** so that this refusal, the FR-11 sweeper's
+  schedule, and the retry and dead-letter paths are all exercisable in this
+  repo rather than only in a host app. The queue gem belongs in the root
+  `Gemfile`'s development and test group, alongside `pg` and `pundit` — not in
+  `strata.gemspec`, which stays free of any queue dependency.
 
 ### 5.9 Operator tooling
 
@@ -1109,8 +1114,14 @@ belongs in Phase 1 alongside §6.2 because it edits the same two methods.
   mention in any doc, and its spec
   (`spec/lib/tasks/strata_events_spec.rb:46`) only asserts argument validation
   against a stubbed `EventManager`, which is why the no-op was never caught.
-  Whether a *host* app calls it is the only open part. Out of scope to fix
-  here.
+  Whether a *host* app calls it is the only open part, and it is not urgent:
+  under this design the task's no-op stops being invisible. It resolves no
+  target, so [§5.5a](#55a-target-resolution-targets_for) writes one
+  `"unmatched"` delivery row and [§5.6a](#56a-handler-outcome-contract) records
+  `no_match` — so anyone still running it finds out, from the mechanism this
+  work exists to add, rather than from this spec. Decide before Phase 3 ships;
+  the rake tasks were added in `06ba5eb` (Michael Crawford, 2025-06-09), which
+  is where to ask.
 - `Strata::EventManager` lives in `app/helpers/` though it is not a helper.
   Moving it is a breaking constant-path change in spirit; not proposed here.
 
@@ -1328,7 +1339,9 @@ use.
 
 1. Bump the gem. Nothing changes — `durable` defaults off
    ([§9.3](#93-phase-3--durable-delivery)).
-2. Run `rails generate strata:events_migration && rails db:migrate`.
+2. Run `rails generate strata:events && rails db:migrate`. Named for the
+   `strata:audit_log` precedent — a `Rails::Generators::Base` whose only job is
+   installing a migration, with the models shipped by the engine.
 3. Run `rake strata:events:check_payloads` over a representative sample of your
    own publishers. Anything it reports must be fixed before step 7: once
    durability is on, an unserializable payload rejects the record that
@@ -1544,11 +1557,14 @@ choice — four of the five want a named owner, not a preference.
 5. **How long does `legacy_publish` live?** [§5.5](#55-publish-path) proposes
    removing it two releases after Phase 3, which is what finally makes FR-6
    unconditional. Confirm that timeline is acceptable to host teams.
-6. **Does any host app call `rake strata:events:publish_case_event`?** Narrowed
-   to that, because nothing in this repo does and the task is provably a no-op
-   for its apparent purpose
-   ([§6.5](#65-lower-severity-worth-fixing-in-passing)). If no host uses it,
-   delete it rather than port it.
+6. **Does any host app call `rake strata:events:publish_case_event`?** The
+   least urgent question here, and the only one that answers itself if left
+   alone. Nothing in this repo calls it and it is provably a no-op for its
+   apparent purpose ([§6.5](#65-lower-severity-worth-fixing-in-passing)); under
+   this design that no-op surfaces as an `"unmatched"` delivery recorded
+   `no_match`, so a host still running it will see it. Worth asking whoever
+   added it (`06ba5eb`) before Phase 3, and deleting rather than porting it if
+   no host depends on it — but it blocks nothing in the meantime.
 
 ---
 
