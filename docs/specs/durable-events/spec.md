@@ -448,9 +448,12 @@ Three things to note:
   intent. The event row is written in the same transaction as the domain write,
   so a rollback discards both (FR-6), and jobs are enqueued only after the
   outermost commit. If no transaction is open, the block runs immediately.
-- **`publish` returns the `Strata::Event`** instead of `nil`. This is additive:
-  the previous return value was the `instrument` result, which no caller uses.
-  Engineering should confirm that during implementation.
+- **`publish` returns the `Strata::Event`** instead of `nil`. Confirmed
+  additive rather than assumed to be: of the twelve `EventManager.publish`
+  call sites in the engine, the dummy app and the suite
+  (`application_form.rb:103,108`, `task.rb:77`, both rake tasks, and seven in
+  specs), none assigns or inspects the return value, which today is the
+  `instrument` result.
 - **Serialization happens before the transaction opens**, so a serialization
   failure writes nothing — though it does still abort the caller's `save!`. See
   [§5.3](#53-payload-serialization).
@@ -845,10 +848,10 @@ Strata::Events.durable          = false      # master switch; default off (9.3, 
 Strata::Events.queue_name       = :strata_events
 Strata::Events.max_attempts     = 5          # read at delivery time (5.6)
 Strata::Events.stranded_after   = 5.minutes  # sweeper threshold (5.5b)
-Strata::Events.retention_period = 90.days    # placeholder — see 11.1
+Strata::Events.retention_period = nil        # pruning is opt-in — see 8.1, 11.1
 ```
 
-Four clarifications. Each of the first three was a contradiction in an earlier
+Five clarifications. Each of the first three was a contradiction in an earlier
 draft rather than a refinement:
 
 - **`durable` defaults to `false`**, agreeing with
@@ -870,6 +873,17 @@ draft rather than a refinement:
   a runtime flip, which [§5.4](#54-durable-vs-in-process-subscribers) requires
   implementations to raise on. A flag that changed mid-process would leave
   subscribers on whichever path they chose at boot and deliver nothing at all.
+- **`retention_period` defaults to `nil`, so nothing is ever pruned until a
+  host sets it deliberately.** An earlier draft defaulted it to `90.days` and
+  [§11.1](#111-retention-and-encryption-requirements-are-unconfirmed) then said
+  not to ship that unreviewed, which made the default a merge blocker on a
+  policy question engineering cannot answer. `nil` resolves that: a default
+  that deletes nothing cannot delete a record someone is legally required to
+  keep, so the prune mechanism gets reviewed on its merits and the retention
+  *obligation* stays an open question with no deadline attached to it.
+  `prune` must report that it did nothing and why, rather than exiting
+  silently ([§5.9](#59-operator-tooling)) — a task that quietly no-ops is its
+  own trap, and `nil` is the state every host starts in.
 - **`durable = true` with a non-durable queue adapter is refused at boot.**
   The adapter is checked against a deny-list — `async`, `inline`, and `test`
   outside the test environment. Rails' default is `:async`, an in-process
@@ -1090,8 +1104,13 @@ belongs in Phase 1 alongside §6.2 because it edits the same two methods.
   unlikely, but the durable registry should not repeat the pattern.
 - `rake strata:events:publish_case_event` publishes `{ kase: <object> }`, a key
   `Case.for_event` does not recognise — so it returns `none` and drives no
-  transition. This task appears to be already ineffective for its apparent
-  purpose. Worth confirming with whoever wrote it; out of scope to fix here.
+  transition. The task is already ineffective for its apparent purpose, and
+  nothing in this repo depends on it: no caller outside the task itself, no
+  mention in any doc, and its spec
+  (`spec/lib/tasks/strata_events_spec.rb:46`) only asserts argument validation
+  against a stubbed `EventManager`, which is why the no-op was never caught.
+  Whether a *host* app calls it is the only open part. Out of scope to fix
+  here.
 - `Strata::EventManager` lives in `app/helpers/` though it is not a helper.
   Moving it is a breaking constant-path change in spirit; not proposed here.
 
@@ -1210,8 +1229,14 @@ Controls proposed:
    identifier-only payloads is both simpler and a stronger control than
    filtering payloads that should never have carried PII in the first place.
 4. **Retention** (FR-10). An unbounded permanent event log is both a privacy and
-   a cost liability. `retention_period` defaults to 90 days with a prune task.
-   **The 90-day default is a placeholder — see [§11.1](#111-retention-and-encryption-requirements-are-unconfirmed).**
+   a cost liability, so the SDK ships a prune task — but
+   **`retention_period` defaults to `nil` and pruning is opt-in**
+   ([§5.8](#58-configuration)). Decided rather than deferred: an engineering
+   default cannot be right for every host's retention obligation, and the
+   failure modes are asymmetric. Too long is a liability; too short deletes
+   records a program is required to keep. `nil` is the only default that is
+   wrong in neither direction. The obligation itself remains open — see
+   [§11.1](#111-retention-and-encryption-requirements-are-unconfirmed).
 
 ### 8.2 Replay is a privileged operation
 
@@ -1280,6 +1305,7 @@ publishing arbitrary objects it is a rejected domain write. That is why
 
 Job, retries, dead-lettering, idempotency, the FR-11 sweeper
 ([§5.5b](#55b-recovering-stranded-deliveries-fr-11)), the case lock for FR-8,
+the per-step `retryable: false` opt-out ([§11.3](#113-at-least-once-delivery-can-double-fire-external-side-effects)),
 and §6.1's exception propagation. `Strata::Events.durable` defaults to **off**;
 hosts opt in, and a host without a durable queue backend is refused at boot
 ([§5.8](#58-configuration)). Flip the default only after a release of field
@@ -1337,27 +1363,38 @@ for durability to look enabled and deliver nothing.
 
 ### 11.1 Retention and encryption requirements are unconfirmed
 
-**This is the largest open risk in the spec, and it is not a technical one.**
+**This remains the largest open question in the spec, and it is not a technical
+one — but it no longer blocks a phase.**
 
 This work creates a permanent store of event payloads where none existed. The
 data-policy requirements governing that store have not been confirmed against
-Nava policy. The following are therefore **placeholders pending review by
-whoever owns data policy**, not settled recommendations:
+Nava policy. Still unconfirmed, and needing whoever owns data policy:
 
-- The 90-day retention default (§8.1). Benefits programs frequently carry
-  multi-year retention obligations that would make 90 days *non-compliant*, and
-  a prune task that deletes records someone is legally required to keep is a
-  worse outcome than no prune task. Do not ship this default unreviewed.
+- **The actual retention obligation.** Benefits programs frequently carry
+  multi-year obligations, so no engineering default is safe for every host.
 - Whether persisting event payloads at all requires a privacy review or
   DPIA-equivalent before launch.
 - Whether encryption-at-rest for `strata_events.payload` is required. The
   audit-log ADR put encryption explicitly out of scope for `AuditLine#data`;
   whether that extends here is a policy call, not an engineering one.
 
-**Recommended action:** before Phase 2 merges, the owner of Nava's data
-retention and privacy policy confirms retention period, encryption-at-rest, and
-whether a privacy review is required, and this section is replaced with
-citations to those policies.
+**What changed, and why this is no longer a Phase 2 merge blocker.** An earlier
+draft defaulted `retention_period` to `90.days` and then told engineering not
+to ship that default unreviewed — which gated the phase on an answer
+engineering cannot produce. The default is now `nil`
+([§5.8](#58-configuration), [§8.1](#81-event-payloads-are-a-new-pii-sink)), so
+the prune task ships disabled and deletes nothing until a host opts in. A
+default that cannot delete anything cannot delete a record someone must keep,
+which is the specific harm this section exists to prevent.
+
+So the mechanism can be reviewed in Phase 2 on its own merits, and the
+obligation is answered before any host sets `retention_period` — not before the
+SDK merges. **No host should enable pruning until it is answered**, and that
+belongs in the upgrade notes rather than in the SDK's release gate.
+
+**Recommended action:** the owner of Nava's data retention and privacy policy
+confirms retention period, encryption-at-rest, and whether a privacy review is
+required, and this section is replaced with citations to those policies.
 
 The identifier-only rule in [§8.1](#81-event-payloads-are-a-new-pii-sink)
 narrows this question without answering it. A store of case and task IDs plus
@@ -1443,9 +1480,20 @@ twice." Mitigations:
   [§5.8](#58-configuration), make it a setting the delivery job actually reads,
   so an operator who lowers it gets what they asked for rather than a number
   frozen at class-definition time.
-- Consider a per-step `retryable: false` opt-out so hosts can mark a step
-  dead-letter-on-first-failure rather than retry it. **Recommended, and not yet
-  designed** — flagging rather than hiding it.
+- **A per-step `retryable: false` opt-out, letting a host mark a step
+  dead-letter-on-first-failure rather than retry it. Decided in review: this
+  ships with Phase 3** ([§9.3](#93-phase-3--durable-delivery),
+  [§13](#13-decision)), because documentation and a low `max_attempts` are
+  mitigation and this is the only prevention. It is the one item here that
+  stops a non-idempotent callback being called twice rather than making the
+  second call less likely.
+
+  Still to design, and the reason this is a work item rather than a closed
+  question: a `retryable:` option on the four step helpers in
+  `business_process_builder.rb` (`system_process`, `staff_task`,
+  `applicant_task`, `third_party_task`), defaulting to `true` so no existing
+  definition changes; the flag carried on `Strata::Step`; and the delivery job
+  dead-lettering on first failure when it is set.
 
 ### 11.4 Silent no-ops become visible, and the numbers may be alarming
 
@@ -1476,35 +1524,31 @@ domain write, is in
 
 ## 12. Open questions for the team
 
-1. **Retention** — what is the actual obligation? Blocks the §8.1 default.
+Five of the ten questions this section carried are now answered and have moved
+to [§13](#13-decision). What is left needs a person rather than a design
+choice — four of the five want a named owner, not a preference.
+
+1. **Retention — what is the actual obligation?** The *default* is settled
+   (`nil`, pruning opt-in — §13), so this no longer blocks a phase. It does
+   block any host turning pruning on, and it needs the owner of Nava's data
+   retention policy ([§11.1](#111-retention-and-encryption-requirements-are-unconfirmed)).
 2. **Encryption at rest for `payload`** — required for a store of identifiers
-   and timestamps, now that §8.1 rules out attribute values?
-3. **`retryable: false` per step** (§11.3) — in scope for Phase 3 or deferred?
-4. **Should `publish` return the `Strata::Event`?** Additive, but confirm no
-   host depends on the current return value.
-5. **Default for `Strata::Events.durable`** — off through one release is
+   and timestamps, now that §8.1 rules out attribute values? Same owner as 1.
+3. **Default for `Strata::Events.durable`** — off through one release is
    proposed. Is a slower rollout wanted?
-6. **Is `rake strata:events:publish_case_event` actually used?** It appears not
-   to drive transitions today
-   ([§6.5](#65-lower-severity-worth-fixing-in-passing)).
-7. **Who owns the `no_match` number?** §11.4 predicts a non-trivial first
+4. **Who owns the `no_match` number?** §11.4 predicts a non-trivial first
    count. Without someone accountable for watching it, it becomes a status
-   nobody reads and the diagnostic argument for recording it evaporates.
-8. **How long does `legacy_publish` live?** [§5.5](#55-publish-path) proposes
+   nobody reads and the diagnostic argument for recording it evaporates. This
+   one is sharper now that §5.6a makes `no_match` reachable: the mechanism is
+   decided, the readership is not.
+5. **How long does `legacy_publish` live?** [§5.5](#55-publish-path) proposes
    removing it two releases after Phase 3, which is what finally makes FR-6
    unconditional. Confirm that timeline is acceptable to host teams.
-9. **Where and when are delivery targets resolved?**
-   [§5.5a](#55a-target-resolution-targets_for) resolves them at publish time so
-   a delivery row is per (subscriber, case), which is what makes FR-7 per-case
-   and `for_target` work without re-resolving. Resolving at delivery time
-   instead would drop the router and the double `Case.for_event` call, at the
-   cost of one row per subscriber rather than per case. Not settled.
-10. **How does a handler report `no_match`?**
-    [§5.6a](#56a-handler-outcome-contract) uses a return value rather than a
-    `NoMatchingTransition` exception, on the grounds that a no-op is an
-    expected flow and does not belong in `retry_on`'s path or in a host's error
-    tracker. That changes the return value of two SDK methods a host business
-    process could be calling directly, so it needs confirming.
+6. **Does any host app call `rake strata:events:publish_case_event`?** Narrowed
+   to that, because nothing in this repo does and the task is provably a no-op
+   for its apparent purpose
+   ([§6.5](#65-lower-severity-worth-fixing-in-passing)). If no host uses it,
+   delete it rather than port it.
 
 ---
 
@@ -1514,7 +1558,8 @@ The spec as a whole is still a proposal. Per CLAUDE.md, RSpec tests are written
 and approved before any implementation begins, and the phases in §9 are
 separately reviewable.
 
-Four points are settled, decided in review on this PR:
+Nine points are settled. Four were decided in the first round of review on
+this PR:
 
 | Decision | Where |
 | --- | --- |
@@ -1523,7 +1568,19 @@ Four points are settled, decided in review on this PR:
 | FR-8 is served by a **`FOR UPDATE` lock on the case row**. Advisory locks, optimistic locking, queue-level concurrency keys, and dropping FR-8 were each considered and rejected on the record. | [§5.6](#56-delivery-job-and-idempotency) |
 | **Phase 1 ships §6.2, §6.4, and a publish-boundary rescue.** §6.1's exception propagation waits for Phase 3, because publishing is not disjoint from the domain write. | [§6.1](#61-execute_current_step-swallows-every-exception), [§9.1](#91-phase-1--fix-the-blockers-no-new-behavior) |
 
-Everything in [§12](#12-open-questions-for-the-team) remains open, including
-two design questions surfaced by the same review — target resolution timing
-(question 9) and the `no_match` reporting mechanism (question 10). The spec
-takes a position on both; neither is confirmed.
+Five more were settled on 2026-09-17, closing four of the open questions and
+answering a fifth from the code:
+
+| Decision | Where |
+| --- | --- |
+| **A handler reports a no-op by return value** — `:transitioned` / `:no_match` — not by raising `NoMatchingTransition`. A no-op is an expected flow and does not belong in `retry_on`'s path or a host's error tracker. The callback shape subscribers *receive* is untouched, so NFR-1 holds; the return value of two SDK methods changes, and that is the accepted cost. | [§5.6a](#56a-handler-outcome-contract), [§6.4](#64-transition_to_next_step-reports-nothing-to-its-caller) |
+| **`retention_period` defaults to `nil` and pruning is opt-in**, which takes retention off Phase 2's merge gate without pretending the policy question is answered. The obligation still blocks any host enabling pruning. | [§5.8](#58-configuration), [§8.1](#81-event-payloads-are-a-new-pii-sink), [§11.1](#111-retention-and-encryption-requirements-are-unconfirmed) |
+| **Delivery targets resolve at publish time**, so a delivery row is per (subscriber, case). That is what makes FR-7 per-case and `for_target` work without re-resolving; the accepted cost is the router, the double `Case.for_event` call, and a case created between publish and delivery receiving nothing. | [§5.5a](#55a-target-resolution-targets_for) |
+| **Per-step `retryable: false` ships with Phase 3.** Documentation and a low `max_attempts` reduce the chance of a duplicate payment; this is the only control that prevents one. Still to design — see §11.3. | [§11.3](#113-at-least-once-delivery-can-double-fire-external-side-effects), [§9.3](#93-phase-3--durable-delivery) |
+| **`publish` returns the `Strata::Event`.** Not a judgement call: no caller in the engine, the dummy app or the suite reads the current return value. | [§5.5](#55-publish-path) |
+
+[§12](#12-open-questions-for-the-team) carries what is left. Four of those five
+want a named owner rather than a decision — retention obligation, encryption at
+rest, the `no_match` readership, and the `legacy_publish` timeline — which is
+the shape of the remaining risk in this work: the design is settled well ahead
+of the policy and ownership around it.
