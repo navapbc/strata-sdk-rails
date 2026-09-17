@@ -615,8 +615,11 @@ argument for NFR-4. It cannot be assumed — Sidekiq on Redis cannot do it — s
 the sweeper remains the portable mechanism and becomes a cheap backstop rather
 than the primary one.
 
-Engineering should decide which is primary per host. The sweeper is not
-optional in a design that claims FR-1 across arbitrary durable backends.
+**Decided in review:** the sweeper is required, and a same-database backend is
+preferred where a host can run one. Sidekiq stays supported (NFR-4), so the
+sweeper — not the backend choice — is what carries FR-1. A host on Solid Queue
+or GoodJob still gets the window closed outright and keeps the sweeper as a
+cheap backstop.
 
 ### 5.6 Delivery job and idempotency
 
@@ -723,6 +726,21 @@ Two implementation notes:
   applies to the cases query alone and is safe. If a future change turns it
   into an eager load, Postgres rejects `FOR UPDATE` on the nullable side of an
   outer join. Worth a regression test rather than a comment.
+
+**Four alternatives were considered and rejected**, recorded here because
+"lock the case row" reads like the only option and it is not:
+
+| Alternative | Why not |
+| --- | --- |
+| `pg_advisory_xact_lock(hashtext(target_id))` | Same lock lifetime — Postgres releases it at COMMIT or ROLLBACK, and no unlock call exists for it — so it does not leak the way session-scoped `pg_advisory_lock` does. Rejected on three smaller counts: it needs raw SQL, against CLAUDE.md's "avoid raw SQL when ActiveRecord suffices"; `hashtext` collisions make two unrelated cases serialize for no visible reason; and called outside an explicit transaction it attaches to the implicit single-statement transaction and releases immediately, giving *zero* mutual exclusion, silently. That last one is an invariant every future call site has to keep. |
+| Optimistic locking (`lock_version` on cases) | Holds no lock at all, and the `StaleObjectError` retry composes well with the job's existing retry machinery — the error fires at `save!`, before `execute_current_step`, so no side effects run twice. Rejected on migration cost: no case table has `lock_version` today, and `lib/generators/strata/case` ships no migration template, so the SDK cannot provide it and every existing host migrates by hand. It also widens the blast radius — a staff member editing a case in the UI would trigger a delivery retry. |
+| Queue-level concurrency key (Solid Queue `limits_concurrency`, GoodJob throttling) | Arguably the cleanest mechanism of the five: per-case serialization with no database lock anywhere. Rejected because it is backend-specific, so FR-8 would hold on Solid Queue and GoodJob and not on Sidekiq. A functional requirement should not depend on which queue a host picked (NFR-4). Review settled the opposite way — Sidekiq stays supported ([§13](#13-decision)) — so this stays rejected unless that changes. |
+| Drop FR-8 | The `(current_step, event_name)` transition key already makes an out-of-order event a no-op, so the realistic worst case is a recorded `no_match` rather than corruption. Rejected because "mitigated" is not "prevented": two handlers that interleave between `for_event` and `save!` still both advance the same case. |
+
+Session-scoped `pg_advisory_lock` is called out explicitly as the thing *not*
+to reach for if this is ever revisited. Under a connection pool, a raise before
+the unlock returns the connection to the pool still holding the lock, and an
+unrelated later request inherits it.
 
 ### 5.6a Handler outcome contract
 
@@ -887,17 +905,22 @@ scope :stale,      ->(cutoff) { where("created_at < ?", cutoff) }
 scope :for_target, ->(record) { where(target_type: record.class.name, target_id: record.id) }
 ```
 
-**On keeping `dead` as a state distinct from `failed`.** It is fair to ask
-whether `failed` plus an attempt count would do. It would not, quite.
+**On keeping `dead` as a state distinct from `failed`.** Asked in review and
+decided: `dead` stays, and it is assigned for *both* terminal causes —
+exhausted retries and an undeserializable payload. The alternative considered
+was `failed` plus an attempt count, and a narrower variant where `dead` marked
+only the unretryable cause. Neither holds up.
 `attempts >= max_attempts` re-derives a terminal fact from a mutable setting,
 so raising `max_attempts` silently resurrects deliveries an operator has
 already triaged as given-up, and a delivery that raised on its final attempt
 reads identically to one with a retry still coming. `dead` is what FR-3's
 "never silently dropped" and FR-5's replay actually query, it is what keeps
 `unresolved` meaningful, and it is the only way to distinguish *this will never
-succeed* (a deleted GlobalID) from *this has not succeeded yet*. Now that §5.6
-assigns it in both places, the cost of keeping it is two status writes rather
-than a state machine.
+succeed* (a deleted GlobalID) from *this has not succeeded yet*. Restricting
+`dead` to only that unretryable cause would leave exhausted retries in
+`unresolved` forever and force operators to run two queries to answer one
+question. Now that §5.6 assigns it in both places, the cost of keeping it is
+two status writes rather than a state machine.
 
 ### 5.10 Cross-process delivery is a consequence, not a feature
 
@@ -1456,31 +1479,51 @@ domain write, is in
 1. **Retention** — what is the actual obligation? Blocks the §8.1 default.
 2. **Encryption at rest for `payload`** — required for a store of identifiers
    and timestamps, now that §8.1 rules out attribute values?
-3. **Sweeper, same-database queue, or both?**
-   [§5.5b](#55b-recovering-stranded-deliveries-fr-11) ships the sweeper because
-   it is portable across backends, but a host on Solid Queue or GoodJob can
-   enqueue inside the publisher's transaction and remove the stranded state
-   altogether. Is requiring a same-database backend acceptable, or must Sidekiq
-   stay supported?
-4. **`retryable: false` per step** (§11.3) — in scope for Phase 3 or deferred?
-5. **Should `publish` return the `Strata::Event`?** Additive, but confirm no
+3. **`retryable: false` per step** (§11.3) — in scope for Phase 3 or deferred?
+4. **Should `publish` return the `Strata::Event`?** Additive, but confirm no
    host depends on the current return value.
-6. **Default for `Strata::Events.durable`** — off through one release is
+5. **Default for `Strata::Events.durable`** — off through one release is
    proposed. Is a slower rollout wanted?
-7. **Is `rake strata:events:publish_case_event` actually used?** It appears not
+6. **Is `rake strata:events:publish_case_event` actually used?** It appears not
    to drive transitions today
    ([§6.5](#65-lower-severity-worth-fixing-in-passing)).
-8. **Who owns the `no_match` number?** §11.4 predicts a non-trivial first
+7. **Who owns the `no_match` number?** §11.4 predicts a non-trivial first
    count. Without someone accountable for watching it, it becomes a status
    nobody reads and the diagnostic argument for recording it evaporates.
-9. **How long does `legacy_publish` live?** [§5.5](#55-publish-path) proposes
+8. **How long does `legacy_publish` live?** [§5.5](#55-publish-path) proposes
    removing it two releases after Phase 3, which is what finally makes FR-6
    unconditional. Confirm that timeline is acceptable to host teams.
+9. **Where and when are delivery targets resolved?**
+   [§5.5a](#55a-target-resolution-targets_for) resolves them at publish time so
+   a delivery row is per (subscriber, case), which is what makes FR-7 per-case
+   and `for_target` work without re-resolving. Resolving at delivery time
+   instead would drop the router and the double `Case.for_event` call, at the
+   cost of one row per subscriber rather than per case. Not settled.
+10. **How does a handler report `no_match`?**
+    [§5.6a](#56a-handler-outcome-contract) uses a return value rather than a
+    `NoMatchingTransition` exception, on the grounds that a no-op is an
+    expected flow and does not belong in `retry_on`'s path or in a host's error
+    tracker. That changes the return value of two SDK methods a host business
+    process could be calling directly, so it needs confirming.
 
 ---
 
 ## 13. Decision
 
-None yet. This spec is a proposal. Per CLAUDE.md, RSpec tests are written and
-approved before any implementation begins, and the phases in §9 are separately
-reviewable.
+The spec as a whole is still a proposal. Per CLAUDE.md, RSpec tests are written
+and approved before any implementation begins, and the phases in §9 are
+separately reviewable.
+
+Four points are settled, decided in review on this PR:
+
+| Decision | Where |
+| --- | --- |
+| The FR-11 sweeper is **required**, not optional, and a same-database queue backend is **preferred** where a host can run one. Sidekiq stays supported, so the sweeper carries the guarantee. | [§5.5b](#55b-recovering-stranded-deliveries-fr-11) |
+| `dead` stays a distinct status and is assigned for **both** terminal causes — exhausted retries and an undeserializable payload. | [§5.6](#56-delivery-job-and-idempotency), [§5.9](#59-operator-tooling) |
+| FR-8 is served by a **`FOR UPDATE` lock on the case row**. Advisory locks, optimistic locking, queue-level concurrency keys, and dropping FR-8 were each considered and rejected on the record. | [§5.6](#56-delivery-job-and-idempotency) |
+| **Phase 1 ships §6.2, §6.4, and a publish-boundary rescue.** §6.1's exception propagation waits for Phase 3, because publishing is not disjoint from the domain write. | [§6.1](#61-execute_current_step-swallows-every-exception), [§9.1](#91-phase-1--fix-the-blockers-no-new-behavior) |
+
+Everything in [§12](#12-open-questions-for-the-team) remains open, including
+two design questions surfaced by the same review — target resolution timing
+(question 9) and the `no_match` reporting mechanism (question 10). The spec
+takes a position on both; neither is confirmed.
