@@ -128,8 +128,9 @@ property and [§8.1](#81-event-payloads-are-a-new-pii-sink) proposes keeping it.
 
 ## 4. Requirements
 
-FR-11 and §6.4 were added after review, and several requirements below were
-narrowed rather than restated — FR-6 now names its carve-out and NFR-4 now
+FR-11 and §6.4 were added after review, and FR-7, FR-8 and FR-11 were then
+narrowed again in a third round. Several requirements below were narrowed
+rather than restated — FR-6 now names its carve-out and NFR-4 now
 names a prerequisite. Where a requirement changed, the section it points to
 says what the earlier version claimed and why it did not hold.
 
@@ -143,11 +144,11 @@ says what the earlier version claimed and why it did not hold.
 | FR-4 | Delivery outcome per (event, subscriber) is queryable: `pending`, `succeeded`, `failed`, `no_match`, `dead`. |
 | FR-5 | A `dead` or `failed` delivery can be replayed by an operator without republishing the event. |
 | FR-6 | When `publish` is called inside a transaction that later rolls back, no event row survives and no durable delivery happens. Legacy lambda subscribers are explicitly outside this guarantee — see [§5.5](#55-publish-path). |
-| FR-7 | A redelivery of an event already applied to a case must not re-apply it (no duplicate task creation, no double step advance). |
-| FR-8 | Deliveries for the same case are serialized; two jobs never mutate one case's step concurrently. |
+| FR-7 | A redelivery of an event already applied must not re-apply it (no duplicate task creation, no double step advance). Enforced per (event, subscriber) by the status check in [§5.6](#56-delivery-job-and-idempotency), and per case by the conditional transition in the same section. |
+| FR-8 | Two jobs never both advance one case's step. Served by a conditional UPDATE on the step the handler read, plus a queue concurrency key where the backend provides one — see [§5.6](#56-delivery-job-and-idempotency). |
 | FR-9 | Payloads containing ActiveRecord objects survive a serialize/deserialize round trip, and symbol keys are preserved so `Case.for_event` keeps matching. |
 | FR-10 | Events are prunable by age via a documented, operator-run task. |
-| FR-11 | A delivery committed as `pending` whose enqueue was lost is re-enqueued automatically, with no operator action. |
+| FR-11 | A delivery committed as `pending` whose enqueue was **lost** is re-enqueued automatically, with no operator action. Distinguished from a merely slow queue by `enqueued_at` ([§5.5b](#55b-recovering-stranded-deliveries-fr-11)). |
 
 ### Non-functional
 
@@ -171,16 +172,16 @@ says what the earlier version claimed and why it did not hold.
 flowchart TD
   A["caller: EventManager.publish(key, payload)"] --> B["serialize payload<br/>(ActiveJob::Arguments)<br/>before any transaction opens"]
   B --> C["INSERT strata_events<br/>(joins the caller's transaction)"]
-  C --> D["INSERT strata_event_deliveries<br/>one per (durable subscriber, target)"]
+  C --> D["INSERT strata_event_deliveries<br/>one per durable subscriber"]
   D --> I["run legacy in-process subscribers<br/>synchronously — today's behavior,<br/>still inside the transaction"]
   I --> E{"transaction<br/>commits?"}
   E -->|"rolled back"| F["no event row,<br/>no durable delivery (FR-6)"]
   E -->|"committed"| G["after_all_transactions_commit"]
-  G --> H["enqueue EventDeliveryJob<br/>per pending delivery"]
+  G --> H["enqueue EventDeliveryJob<br/>per pending delivery,<br/>then stamp enqueued_at"]
   G -.->|"process killed here"| R["delivery stranded at pending"]
   R --> S["requeue_stranded sweeper<br/>re-enqueues it (FR-11)"]
   S --> H
-  H --> J["job: lock delivery, then lock the case;<br/>call subscriber, record the outcome"]
+  H --> J["job: lock delivery, dispatch to handle_event;<br/>each transition is a conditional UPDATE<br/>on the step it read (FR-8)"]
   J --> K{"outcome"}
   K -->|"applied"| L["succeeded"]
   K -->|"no transition matched"| P["no_match"]
@@ -225,17 +226,15 @@ create_table :strata_event_deliveries, id: :uuid do |t|
   t.references :strata_event, null: false, type: :uuid,
                foreign_key: { on_delete: :cascade }   # required by FR-10, see below
   t.string   :subscriber_key,  null: false   # e.g. "PassportBusinessProcess.handle_event"
-  t.string   :target_key,      null: false   # delivery identity, never NULL — see below
-  t.string   :target_type                     # e.g. "PassportCase"; nil for start events
-  t.uuid     :target_id                       # nil for start events
   t.integer  :status,          null: false, default: 0
   t.integer  :attempts,        null: false, default: 0
-  t.string   :from_step                       # step at time of application
+  t.datetime :enqueued_at                     # nil until perform_later returned — see 5.5b
   t.text     :last_error
   t.datetime :completed_at
   t.timestamps
-  t.index [ :strata_event_id, :subscriber_key, :target_key ],
+  t.index [ :strata_event_id, :subscriber_key ],
           unique: true, name: "index_strata_event_deliveries_uniqueness"
+  t.index [ :status, :enqueued_at ]           # the FR-11 sweeper's query
   t.index [ :status, :created_at ]
 end
 ```
@@ -249,23 +248,23 @@ plain FK makes FR-10 raise `ActiveRecord::InvalidForeignKey` the first time it
 runs. The cascade is preferred over `dependent: :delete_all` because the prune
 task uses `delete_all` and skips callbacks.
 
-**`target_key` exists so delivery identity contains no NULLs.** The obvious
-index — `(strata_event_id, subscriber_key, target_type, target_id)` — enforces
-nothing for the rows that need it most. Start events and
-`rake strata:events:publish_event` resolve no target
-([§5.5a](#55a-target-resolution-targets_for)), so `target_type`/`target_id` are
-NULL there, and Postgres treats NULLs as distinct in a unique index: two rows
-with the same event and subscriber are both accepted, permitting exactly the
-duplicate case creation FR-7 is meant to rule out. `target_key` is a NOT NULL
-discriminator written by the model — `"PassportCase/<uuid>"` for a resolved
-target, the literal string `"start"` for a start event — so every row is
-constrained. `target_type`/`target_id` remain as nullable columns backing the
-`for_target` scope.
+**Delivery identity is `(event, subscriber)`, and that is deliberately all it
+is.** An earlier draft resolved target cases at publish time and wrote one row
+per (subscriber, case), which forced three further columns —
+`target_key`, `target_type`, `target_id` — and a NOT NULL sentinel vocabulary
+(`"start"`, `"unmatched"`, `"unrouted"`) so the unique index would still
+constrain rows that resolved no target. All of that is gone with the
+resolution; see [§5.5a](#55a-why-targets-are-not-resolved-at-publish-time) for
+why, and what it removed.
 
-Two alternatives were considered and rejected: `nulls_not_distinct: true`
-(correct, but Postgres 15+ only, and the SDK cannot assume a host's Postgres
-version), and NOT NULL on `target_id` itself (there is no honest sentinel UUID
-for "the case does not exist yet").
+With one row per subscriber there are no NULLs in the identity, so no
+discriminator is needed, `nulls_not_distinct: true` is not needed either (it is
+Postgres 15+ only and the SDK cannot assume a host's version), and the question
+of an honest sentinel UUID for "the case does not exist yet" does not arise.
+
+`from_step` is gone for the same reason: one delivery now covers however many
+cases the event resolves to, so a single step-at-time-of-application column has
+no coherent value to hold.
 
 **What the index does and does not do.** It prevents duplicate delivery *rows*
 at insert time. It does not prevent one row being *executed* twice, which is
@@ -355,6 +354,24 @@ def subscribe(event_key, callback)
   end
 end
 
+# Registry interface. These are the only two lookups the design needs; an
+# earlier draft also called `owner_of`, which the router used and which went
+# with it (5.5a).
+#
+#   EventManager.durable_subscribers_for(event_key) -> [String]
+#     Subscriber keys registered durably for this event. Read by `publish`
+#     to decide which delivery rows to write (5.5).
+#
+#   EventManager.resolve_subscriber(subscriber_key) -> #call
+#     Rebuilds the callable from its stored key, e.g.
+#     "PassportBusinessProcess.handle_event" -> the bound Method. Read by the
+#     delivery job (5.6).
+#
+# Both need a registry keyed by event with the callback retained. Today
+# `@@subscriptions` (event_manager.rb:21) is a flat array of opaque
+# ActiveSupport::Notifications handles with no event key and no callback, so
+# this is genuinely new code rather than a lookup against something existing.
+#
 # A callback is durably addressable when it is a Method bound to a named
 # class or module — the receiver and method name can be rebuilt in any process.
 def durable_reference?(callback)
@@ -420,18 +437,20 @@ def publish(event_key, payload = {})
   ActiveRecord::Base.transaction(requires_new: false) do
     event = Strata::Event.create!(name: event_key, payload: serialized, published_at: Time.current)
 
-    Strata::Events::Router.new(event_key, payload).each_delivery do |d|
-      event.deliveries.create!(
-        subscriber_key: d[:subscriber_key],
-        target_key:     d[:target_key],
-        target_type:    d[:target]&.class&.name,
-        target_id:      d[:target]&.id
-      )
+    # One row per durable subscriber. No queries, no target resolution — which
+    # is what makes NFR-6 true rather than aspirational. See 5.5a.
+    Strata::EventManager.durable_subscribers_for(event_key).each do |subscriber_key|
+      event.deliveries.create!(subscriber_key: subscriber_key)
     end
   end
 
   ActiveRecord.after_all_transactions_commit do
-    event.deliveries.pending.find_each { |d| Strata::EventDeliveryJob.perform_later(d.id) }
+    event.deliveries.pending.find_each do |d|
+      Strata::EventDeliveryJob.perform_later(d.id)
+      # Stamped after the enqueue returns, so the sweeper can tell a lost
+      # enqueue from a slow queue. See 5.5b.
+      d.update_columns(enqueued_at: Time.current)
+    end
   end
 
   # Legacy lambda subscribers. Deliberately still here — inside the caller's
@@ -441,8 +460,13 @@ def publish(event_key, payload = {})
 end
 ```
 
-Three things to note:
+Four things to note:
 
+- **`publish` performs no queries on the hot path.** One INSERT for the event,
+  one per durable subscriber, one enqueue each. NFR-6 says exactly this, and
+  the earlier router design contradicted it — it ran a `Case.for_event` SELECT
+  per subscriber and inserted up to N rows per subscriber
+  ([§5.5a](#55a-why-targets-are-not-resolved-at-publish-time)).
 - **`after_all_transactions_commit`** (Rails 7.2+, satisfied by the gemspec's
   `rails >= 7.2.2.2`) is what fixes the `after_create` hazard flagged in the
   intent. The event row is written in the same transaction as the domain write,
@@ -489,87 +513,88 @@ deprecation path, not a design element:
 The deprecation is worth committing to in this spec because it is the only path
 by which FR-6 ever becomes unconditional.
 
-### 5.5a Target resolution (`targets_for`)
+### 5.5a Why targets are not resolved at publish time
 
-The pseudocode above calls into a router. An earlier draft called
-`targets_for(...)` without defining it; review caught that, and the check is
-worth recording plainly — `targets_for` appears nowhere else in this spec, and
-neither it nor `Strata::Events::Router` exists anywhere in the engine today
-(`grep -r targets_for` over the repo returns only the line above). Both are
-proposed here for the first time.
+An earlier draft resolved the target cases for an event at publish time, via a
+`Strata::Events::Router`, and wrote one delivery row per (subscriber, case).
+Review found that FR-8 was unmet under it, and the reason turned out to be
+structural rather than a missing lock: **the design resolved targets twice, at
+two different times, and the two disagreed.**
 
-That gap matters more than a missing definition normally would, because the
-start-event case breaks the obvious implementation. `ApplicationForm#publish_created`
-(`after_create`, `app/models/strata/application_form.rb:51,101`) publishes
-`<Class>Created`, which is a *start* event (`business_process_builder.rb:57-62`).
-Its handler **creates** the case — no case row exists when the event is
-published. A router that resolves targets by looking up cases finds none,
-writes no delivery row, enqueues no job, and `BusinessProcess.create_case_from_event`
-(`business_process.rb:135`) never runs. Under `durable = true` that silently
-produces zero cases for every new application: the entire intake path, failing
-quietly.
+The row was keyed to a case resolved at publish. But the job dispatched through
+`BusinessProcess.handle_event`, which calls `Case.for_event` again at delivery
+and iterates **every** matching case (`business_process.rb:156`). So a delivery
+row named case A while its dispatch wrote A *and* B. With an
+`application_form_id` payload matching two cases — reachable, because
+`for_application_form` is a bare `where(application_form_id:)`
+(`case.rb:74`) and the index on that column is not unique in any case table —
+two workers each held a lock on one case and each wrote two:
 
-Target resolution therefore has branches, and the start branch is not an edge
-case:
+- Worker 1 takes delivery A, locks case A, transitions A and B.
+- Worker 2 takes delivery B, locks case B, transitions A and B.
 
-```ruby
-module Strata::Events
-  class Router
-    def initialize(event_key, payload)
-      @event_key = event_key
-      @payload   = payload
-    end
+Neither blocks the other, because they queue on different rows. That is FR-8's
+"two jobs never mutate one case's step concurrently", unmet — the same failure
+as the delivery-row lock it replaced, one level up.
 
-    # Yields one hash per delivery row to write.
-    def each_delivery
-      Strata::EventManager.durable_subscribers_for(@event_key).each do |subscriber_key|
-        deliveries_for(subscriber_key).each { |d| yield d.merge(subscriber_key:) }
-      end
-    end
+Three further consequences, each a symptom of the same split:
 
-    private
+- **N matching cases did N² transitions**, and N−1 of the N deliveries recorded
+  `no_match` even when the event applied perfectly — injecting systematic false
+  positives into precisely the number [§11.4](#114-silent-no-ops-become-visible-and-the-numbers-may-be-alarming)
+  asks someone to own.
+- **The stated cost was inverted.** The design accepted "a case created between
+  publish and delivery receives nothing", but since the handler re-resolved at
+  delivery time that case *was* transitioned, just under a row locked to a
+  different case.
+- **It contradicted NFR-6**, which asks for one INSERT plus one enqueue per
+  durable subscriber and no N+1 on the hot path. The router ran a SELECT per
+  subscriber and inserted up to N rows.
 
-    def deliveries_for(subscriber_key)
-      process = Strata::EventManager.owner_of(subscriber_key)
+**The decision: resolve targets once, at delivery time.** A delivery row is one
+per (event, subscriber); the job dispatches to `handle_event`, which resolves
+and transitions. Scoping the dispatch to a publish-time target was the narrower
+alternative and would have fixed FR-8, but it keeps everything below, and this
+spec chose to remove the machinery rather than tighten it:
 
-      # Not a business process. Nothing to resolve; one row.
-      return [ { target: nil, target_key: "unrouted" } ] unless process.respond_to?(:start_event?)
+| Removed with publish-time resolution | Why it existed |
+| --- | --- |
+| `Strata::Events::Router` and this section's 80 lines of routing rules | Resolving targets before the handler ran |
+| `target_key`, `target_type`, `target_id` ([§5.2](#52-data-model)) | Naming the resolved case on the row |
+| The `"start"` / `"unmatched"` / `"unrouted"` sentinels and the NOT NULL discriminator | Keeping the unique index meaningful for rows with no target |
+| The `nulls_not_distinct` and sentinel-UUID discussion | Same |
+| `with_locked_target` and `for_target` ([§5.6](#56-delivery-job-and-idempotency), [§5.9](#59-operator-tooling)) | Locking and querying by resolved target |
+| `EventManager.owner_of` | Letting the router ask which process owns a subscriber |
+| The second `Case.for_event` call | Re-resolving what publish already resolved |
 
-      # Start event. The subscriber's job is to CREATE the case, so there is
-      # deliberately nothing to resolve. Exactly one row.
-      return [ { target: nil, target_key: "start" } ] if process.start_event?(@event_key)
+**The start-event branch is the reason this is worth more than its line count.**
+`ApplicationForm#publish_created` (`after_create`,
+`app/models/strata/application_form.rb:51,101`) publishes `<Class>Created`, a
+start event whose handler *creates* the case — so no case exists to resolve
+when the event is published. A router that resolves by looking up cases finds
+none, writes no delivery row, and `create_case_from_event`
+(`business_process.rb:135`) never runs: under `durable = true` that silently
+produces **zero cases for every new application**. The router needed an
+explicit branch to avoid it. Resolving at delivery time has no branch to
+forget, because `handle_event` already handles start events
+(`business_process.rb:152`) and always has.
 
-      cases = process.case_class.for_event({ name: @event_key, payload: @payload })
+What this gives up, stated plainly:
 
-      # No case matched. Still one row, so the no_match is recorded (5.2)
-      # instead of the event vanishing as it does today.
-      return [ { target: nil, target_key: "unmatched" } ] if cases.empty?
-
-      cases.map { |kase| { target: kase, target_key: "#{kase.class.name}/#{kase.id}" } }
-    end
-  end
-end
-```
-
-Note the three distinct `target_key` sentinels. Collapsing them into one string
-would make a start delivery and an unmatched delivery collide on the unique
-index ([§5.2](#52-data-model)) — a start event and a stray event for the same
-key would silently deduplicate into one row.
-
-Three properties worth stating, because each is a way to get this wrong:
-
-- **Targets are resolved at publish time; dispatch happens at delivery time.**
-  A case created between the two receives nothing. That is acceptable for
-  transition events, which key on a case that already exists, and it is
-  precisely why start events resolve no target at all.
-- **The router must not assume every durable subscriber owns a `case_class`.**
-  The `respond_to?` guard is the whole mechanism; without it, any non-process
-  durable subscriber raises inside the publisher's transaction.
-- **`Case.for_event` runs twice** — once in the router, once inside
-  `handle_event`. Harmless, since it is a scope, but it means the router depends
-  on the symbol-key behavior in [§6.3](#63-payload-symbol-keys-are-load-bearing).
-  The router sees the *unserialized* payload, so its keys are intact; the job's
-  copy comes back through `ActiveJob::Arguments.deserialize`.
+- **`no_match` is per (event, subscriber), not per case.** The answer to "why
+  didn't my case move?" becomes "this event moved nothing" rather than "case B
+  specifically did not move." Narrower, but free of the N−1 false positives the
+  router introduced, and the per-case detail is still reachable from the event
+  payload.
+- **FR-7 is per (event, subscriber).** A retry after a partially completed
+  handler re-runs the whole handler. That is self-healing rather than harmful:
+  transitions are keyed on `(current_step, event_name)`, so a case the first
+  attempt already moved simply finds no transition and reports a no-op.
+- **Replay replays a whole (event, subscriber)** rather than one case. Coarser,
+  and simpler to reason about for an operator.
+- **A case created between publish and delivery is picked up.** This reverses
+  the earlier decision's stated behavior — in the direction that matches what
+  the code has always done.
 
 ### 5.5b Recovering stranded deliveries (FR-11)
 
@@ -602,10 +627,34 @@ class Strata::RequeueStrandedDeliveriesJob < Strata::ApplicationJob
 end
 ```
 
+**`enqueued_at` is what makes the selection exact, and it is not optional.**
+Keying `stranded` on status and age alone cannot distinguish a delivery whose
+`perform_later` was lost from one that was enqueued normally and is sitting in
+a backed-up queue — both are `pending` and older than the threshold. That makes
+the failure mode self-reinforcing: the 5-minute threshold is justified below as
+"comfortably longer than a normal `pending`-to-running transition", which holds
+only while the queue is healthy. Once it is not — a worker outage, a retry
+storm, a slow deploy — every sweep re-enqueues the entire backlog into a queue
+that is already behind, every five minutes, until it drains.
+
+Stamping `enqueued_at` immediately after `perform_later` returns
+([§5.5](#55-publish-path)) and scoping on `enqueued_at: nil` removes the
+ambiguity. The residual race is in the safe direction: a process killed
+*between* the enqueue and the stamp leaves it nil, so the sweeper re-enqueues a
+job that already exists — one duplicate, absorbed by FR-7's status check,
+rather than a delivery stranded forever.
+
+**What the sweeper is not for.** "Re-enqueueing is safe" is true per delivery
+and misleading in aggregate: the individual duplicate is a no-op, the
+amplification is not. The sweeper recovers *lost* enqueues. It is not a
+liveness mechanism for a queue that is merely slow, not a retry mechanism —
+`retry_on` owns that — and not a way to drain a backlog. A sweep that is
+re-enqueueing large numbers of deliveries is a signal to look at the workers,
+not evidence the sweeper is working.
+
 `stranded_after` defaults to 5 minutes: comfortably longer than a normal
 `pending`-to-running transition, short enough that a deploy-time loss is
-recovered within one sweep. Re-enqueueing is safe because FR-7's status check
-makes a redundant run a no-op. Hosts schedule it with whatever they already use
+recovered within one sweep. Hosts schedule it with whatever they already use
 for recurring work — Solid Queue recurring tasks, GoodJob cron, sidekiq-cron,
 or plain `cron` invoking the rake task in [§5.9](#59-operator-tooling). The SDK
 ships the job and the task, not the schedule.
@@ -661,17 +710,19 @@ class Strata::EventDeliveryJob < Strata::ApplicationJob
     delivery.with_lock do
       return if delivery.succeeded?              # FR-7: already applied
 
-      # FR-8: lock the case, not the delivery row. No-op for target-less
-      # deliveries ("start", "unmatched", "unrouted").
-      delivery.with_locked_target do
-        outcome = delivery.resolve_subscriber.call(delivery.event.to_callback_hash)
+      # FR-8 is not enforced here — it lives in the transition itself, as a
+      # conditional UPDATE on the step the handler read. See below.
+      # resolve_subscriber rebuilds the callable from the stored key (5.4);
+      # to_callback_hash deserializes the payload and returns { name:, payload: },
+      # the shape NFR-1 promises subscribers.
+      subscriber = Strata::EventManager.resolve_subscriber(delivery.subscriber_key)
+      outcome    = subscriber.call(delivery.event.to_callback_hash)
 
-        delivery.update!(
-          status:       Strata::EventDelivery.status_for(outcome),   # 5.6a
-          attempts:     executions,
-          completed_at: Time.current
-        )
-      end
+      delivery.update!(
+        status:       Strata::EventDelivery.status_for(outcome),   # 5.6a
+        attempts:     executions,
+        completed_at: Time.current
+      )
     end
   rescue StandardError => e
     give_up = executions >= Strata::Events.max_attempts
@@ -691,54 +742,82 @@ The transaction spans the subscriber call *and* the status write, so the case's
 step change and the "this was applied" record commit together or not at all.
 This is what closes the gap described in [§6.2](#62-state-is-saved-before-the-step-runs).
 
-**Per-case serialization (FR-8) needs the case lock, not the delivery lock.**
-An earlier draft claimed it came from "`Case.lock.find` inside
-`BusinessProcessInstance`", which is not true of the code:
-`BusinessProcessInstance#initialize(kase, current_step)` receives an
-already-loaded case and never locks
-(`app/models/strata/business_process_instance.rb:28-30`), and nothing in this
-spec added a lock there. The only lock in the original design was on the
-delivery row — and two events for one case are two *different* delivery rows,
-so two workers would take two different locks, both call
-`transition_to_next_step`, and both write `business_process_current_step` on
-the same case. That is precisely what FR-8 forbids.
+**Per-case serialization (FR-8) is served in two layers, and neither is a lock
+held across step execution.** Two earlier designs were wrong in the same way:
+the lock was somewhere other than the write. A lock on the delivery row does
+not serialize two events for one case, because those are two different rows.
+A lock on a publish-time target case did not cover the write set either,
+because the handler re-resolved and wrote every matching case
+([§5.5a](#55a-why-targets-are-not-resolved-at-publish-time)).
 
-`with_locked_target` is therefore where FR-8 lives:
+The fix is to put the check where the write is:
+
+**Layer 1 — a conditional UPDATE, everywhere.** `transition_to_next_step`
+computes its next step from the `current_step` it read, so that step is the
+version token for the write. Make the write conditional on it:
 
 ```ruby
-# Strata::EventDelivery
-def with_locked_target
-  return yield if target_id.blank?
-
-  target_type.constantize.lock.find(target_id)   # FOR UPDATE, held by the
-  yield                                          # surrounding transaction
-end
+# Strata::BusinessProcessInstance
+changed = self.case.class.where(id: self.case.id, business_process_current_step: from_step)
+                         .update_all(business_process_current_step: to_step)
+return :no_match if changed.zero?     # another worker moved it first
+execute_current_step
 ```
 
-Two implementation notes:
+Postgres supplies the serialization: in READ COMMITTED a blocked `UPDATE`
+re-evaluates its `WHERE` against the newly committed row, so the second worker
+sees zero rows affected and executes nothing. The ordering matters and is the
+whole point — the check fires *before* `execute_current_step`, so the losing
+worker runs no side effects at all.
 
-- **Locking a different Ruby object than the handler uses is fine.** The
-  handler re-queries through `Case.for_event` and gets its own instance, but
-  the lock is on the database row and is held by the transaction, so a second
-  worker blocks at `lock.find` until the first commits. This is also the
-  aggregate-root guidance in
-  [docs/contributing/data-modeling-guidelines.md](../../contributing/data-modeling-guidelines.md)
-  ("routes change through aggregate root" with `lock`).
-- **`Strata::Case` carries `default_scope { includes(:tasks) }`**
-  (`app/models/strata/case.rb:73`). That resolves to a preload, so `FOR UPDATE`
-  applies to the cases query alone and is safe. If a future change turns it
-  into an eager load, Postgres rejects `FOR UPDATE` on the nullable side of an
-  outer join. Worth a regression test rather than a comment.
+No migration, no `lock_version` column, no raw SQL, and no lock held while a
+step makes an external call.
 
-**Four alternatives were considered and rejected**, recorded here because
-"lock the case row" reads like the only option and it is not:
+**Layer 2 — a queue concurrency key, where the backend has one.** Solid Queue's
+`limits_concurrency to: 1, key:` and GoodJob's equivalent serialize jobs per
+case at the queue, so contention is resolved before a job starts rather than
+by one worker losing a race. This is also what the workflow engines do —
+Temporal will not dispatch a second task for an execution while one is
+outstanding, Zeebe partitions by process-instance key and runs each partition
+single-threaded, Kafka consumers partition by entity key. It additionally
+provides **per-case ordering**, which [§5.7](#57-ordering) otherwise declines
+to promise.
+
+**Why two layers rather than one.** Layer 2 is the stronger mechanism and is
+backend-specific; layer 1 is weaker and portable. An earlier draft rejected
+queue-level concurrency outright on the grounds that "a functional requirement
+should not depend on which queue a host picked" — but the spec now *prefers* a
+same-database backend ([§13](#13-decision)) and already refuses to boot on
+adapters it does not accept ([§5.8](#58-configuration)), so a capability
+gradient across backends is already the design. Layer 1 makes FR-8 hold on
+Sidekiq; layer 2 makes it hold before a job even starts, and brings ordering
+with it.
+
+**The honest weakness in layer 1: `current_step` is not monotonic.** Every
+system in this family — Camunda 7's revision column, EventStoreDB's expected
+version, DynamoDB's conditional writes, Rails' own `lock_version` — uses a
+token that only increases, so a mismatch always means "someone moved it". A
+step name can return to a previous value, and `transition(from, event, to)`
+(`business_process_builder.rb`) applies no cycle validation, so a
+reject-then-resubmit loop is expressible today. Under a cycle S1 → S2 → S1 a
+stale worker's `WHERE step = 'S1'` can match again and transition as though
+nothing had happened.
+
+That is narrower than the race it replaces — it needs an A-B-A traversal inside
+the window of one stale read — but it is real, and it is the reason layer 2 is
+worth having rather than optional. If cycles turn out to be common in practice,
+the options are cycle validation in the builder or a monotonic token, and the
+latter reopens the migration cost below.
+
+**Four alternatives were considered and rejected**, recorded because the answer
+here is not the obvious one:
 
 | Alternative | Why not |
 | --- | --- |
-| `pg_advisory_xact_lock(hashtext(target_id))` | Same lock lifetime — Postgres releases it at COMMIT or ROLLBACK, and no unlock call exists for it — so it does not leak the way session-scoped `pg_advisory_lock` does. Rejected on three smaller counts: it needs raw SQL, against CLAUDE.md's "avoid raw SQL when ActiveRecord suffices"; `hashtext` collisions make two unrelated cases serialize for no visible reason; and called outside an explicit transaction it attaches to the implicit single-statement transaction and releases immediately, giving *zero* mutual exclusion, silently. That last one is an invariant every future call site has to keep. |
-| Optimistic locking (`lock_version` on cases) | Holds no lock at all, and the `StaleObjectError` retry composes well with the job's existing retry machinery — the error fires at `save!`, before `execute_current_step`, so no side effects run twice. Rejected on migration cost: no case table has `lock_version` today, and `lib/generators/strata/case` ships no migration template, so the SDK cannot provide it and every existing host migrates by hand. It also widens the blast radius — a staff member editing a case in the UI would trigger a delivery retry. |
-| Queue-level concurrency key (Solid Queue `limits_concurrency`, GoodJob throttling) | Arguably the cleanest mechanism of the five: per-case serialization with no database lock anywhere. Rejected because it is backend-specific, so FR-8 would hold on Solid Queue and GoodJob and not on Sidekiq. A functional requirement should not depend on which queue a host picked (NFR-4). Review settled the opposite way — Sidekiq stays supported ([§13](#13-decision)) — so this stays rejected unless that changes. |
-| Drop FR-8 | The `(current_step, event_name)` transition key already makes an out-of-order event a no-op, so the realistic worst case is a recorded `no_match` rather than corruption. Rejected because "mitigated" is not "prevented": two handlers that interleave between `for_event` and `save!` still both advance the same case. |
+| `SELECT ... FOR UPDATE` on the case row | The conventional answer, and what an earlier version of this spec chose. Rejected because it holds a row lock across `execute_current_step`, which can issue an external HTTP call — so lock duration is tied to third-party latency and one slow step blocks every other event for that case. Notably rare in workflow engines for this reason. It also needs the dispatch scoped to a single case to be correct at all, which is the machinery §5.5a removed. |
+| `pg_advisory_xact_lock(hashtext(case_id))` | Same lock lifetime as `FOR UPDATE` — Postgres releases it at COMMIT or ROLLBACK — so it does not leak the way session-scoped `pg_advisory_lock` does. Rejected on three smaller counts: it needs raw SQL, against CLAUDE.md's "avoid raw SQL when ActiveRecord suffices"; `hashtext` collisions make two unrelated cases serialize for no visible reason; and called outside an explicit transaction it attaches to the implicit single-statement transaction and releases immediately, giving *zero* mutual exclusion, silently. |
+| Optimistic locking with a `lock_version` column | A monotonic token, so it has no cycle weakness, and `StaleObjectError` composes with the job's retry machinery. Rejected on migration cost: no case table has `lock_version` today and `lib/generators/strata/case` ships no migration template, so the SDK cannot provide it and every existing host migrates by hand. Layer 1 gets most of the benefit with no migration by using `current_step` as the token; this stays the fallback if cycles prove to be a real problem. |
+| Drop FR-8 | The `(current_step, event_name)` transition key already makes an out-of-order event a no-op, so the common failure is a recorded `no_match` rather than corruption. Rejected because the uncommon one is not recoverable: a step with two outgoing transitions is the normal shape for approve/deny, and two such events arriving concurrently would have **both** branches execute their side effects, with the case landing on whichever wrote last. A notice cannot be un-sent. |
 
 Session-scoped `pg_advisory_lock` is called out explicitly as the thing *not*
 to reach for if this is ever revisited. Under a connection pool, a raise before
@@ -773,11 +852,17 @@ Closing it requires handlers to report an outcome. Two options were weighed:
 ```ruby
 # business_process_instance.rb
 def transition_to_next_step(event)
+  from_step = current_step
   next_step = get_next_step(event[:name])
   return :no_match unless next_step
 
-  self.current_step = next_step
-  self.case.save!
+  # FR-8 (§5.6): conditional on the step we read, so a worker that lost the
+  # race executes nothing. Zero rows affected is a no_match, not an error.
+  changed = self.case.class.where(id: self.case.id, business_process_current_step: from_step)
+                           .update_all(business_process_current_step: next_step)
+  return :no_match if changed.zero?
+
+  self.case.business_process_current_step = next_step
   execute_current_step
   :transitioned
 end
@@ -806,37 +891,48 @@ def self.status_for(outcome)
 end
 ```
 
-Two consequences to accept deliberately:
+Three consequences to accept deliberately:
 
-- **An empty `for_event` result is `no_match`, not a vacuous success.** That is
-  the `"unmatched"` delivery row from
-  [§5.5a](#55a-target-resolution-targets_for), and it is the case most worth
-  seeing — a payload whose `case_id` matches nothing at all.
+- **An empty `for_event` result is `no_match`, not a vacuous success.** The
+  case most worth seeing: a payload whose `case_id` matches nothing at all.
+- **A delivery's outcome aggregates over every case the event resolved to.**
+  With one row per (event, subscriber) rather than per case
+  ([§5.5a](#55a-why-targets-are-not-resolved-at-publish-time)), `:transitioned`
+  means at least one case moved. Where the per-case detail matters, it is
+  reachable from the event payload; recording it per case was what produced
+  N−1 false `no_match` rows under the router.
 - **A host subscriber may return `:no_match`** and get the same reporting for
   free. Document it; do not require it.
 
 ### 5.7 Ordering
 
-**Per-case ordering is provided. Global ordering is not.**
+**Per-case ordering depends on the backend. Global ordering is not provided
+anywhere.**
 
-"The row lock" here means the **case** row lock from
-[§5.6](#56-delivery-job-and-idempotency), not the delivery row lock. That
-distinction is the whole of FR-8: two events for one case are two distinct
-delivery rows, so delivery-row locks do not serialize them against each other
-at all.
+FR-8 gives mutual exclusion, not sequencing
+([§5.6](#56-delivery-job-and-idempotency)). Two events for one case are two
+delivery rows and two jobs, so with layer 1 alone — the conditional UPDATE —
+they can be *processed* out of publication order: serialized, but not
+sequenced.
 
-With the case lock in place, two events for the same case can still be
-*processed* out of publication order if their jobs are picked up out of order —
-serialized, but not sequenced. Today's semantics already tolerate this: a
-transition is keyed on `(current_step, event_name)`, so an event arriving for
-the wrong step is a no-op. Under this design that no-op is recorded as
-`no_match` ([§5.6a](#56a-handler-outcome-contract)) rather than vanishing,
-which makes the situation diagnosable.
+Today's semantics already tolerate that. A transition is keyed on
+`(current_step, event_name)`, so an event arriving for the wrong step is a
+no-op, and under this design that no-op is **recorded** as `no_match`
+([§5.6a](#56a-handler-outcome-contract)) rather than vanishing — which is what
+makes out-of-order traffic diagnosable instead of invisible.
 
-Strict ordering would require a per-case serial queue or a sequence-number
-gate with parking. That is a materially larger design and the intent does not
-ask for it. Recommend deferring, and revisiting if `no_match` counts in
-production show real out-of-order traffic.
+**Layer 2 does provide per-case ordering, as a side effect.** A queue
+concurrency key on the case (Solid Queue, GoodJob) makes a worker take one
+delivery for a case at a time, in queue order. This is the same mechanism
+Temporal and Zeebe use, and it is a further argument for the same-database
+backend [§13](#13-decision) already prefers — ordering arrives without a
+sequence-number gate or a parking scheme.
+
+So: ordering is a capability of the backend rather than a promise of the SDK,
+and the spec says so rather than claiming it uniformly. Strict *global*
+ordering would need a materially larger design and the intent does not ask for
+it. Recommend deferring, and revisiting if `no_match` counts in production show
+real out-of-order traffic on a host that cannot run layer 2.
 
 ### 5.8 Configuration
 
@@ -919,9 +1015,8 @@ live in scopes rather than scattered `where` calls:
 ```ruby
 scope :dead,       -> { where(status: :dead) }
 scope :unresolved, -> { where(status: [ :pending, :failed ]) }
-scope :stranded,   ->(older_than) { pending.where(created_at: ...older_than.ago) }
+scope :stranded,   ->(older_than) { pending.where(enqueued_at: nil, created_at: ...older_than.ago) }
 scope :stale,      ->(cutoff) { where("created_at < ?", cutoff) }
-scope :for_target, ->(record) { where(target_type: record.class.name, target_id: record.id) }
 ```
 
 **On keeping `dead` as a state distinct from `failed`.** Asked in review and
@@ -1115,11 +1210,11 @@ belongs in Phase 1 alongside §6.2 because it edits the same two methods.
   (`spec/lib/tasks/strata_events_spec.rb:46`) only asserts argument validation
   against a stubbed `EventManager`, which is why the no-op was never caught.
   Whether a *host* app calls it is the only open part, and it is not urgent:
-  under this design the task's no-op stops being invisible. It resolves no
-  target, so [§5.5a](#55a-target-resolution-targets_for) writes one
-  `"unmatched"` delivery row and [§5.6a](#56a-handler-outcome-contract) records
-  `no_match` — so anyone still running it finds out, from the mechanism this
-  work exists to add, rather than from this spec. Decide before Phase 3 ships;
+  under this design the task's no-op stops being invisible. `Case.for_event`
+  matches nothing, so `handle_event` returns `:no_match`
+  ([§5.6a](#56a-handler-outcome-contract)) and the delivery records it — so
+  anyone still running the task finds out, from the mechanism this work exists
+  to add, rather than from this spec. Decide before Phase 3 ships;
   the rake tasks were added in `06ba5eb` (Michael Crawford, 2025-06-09), which
   is where to ask.
 - `Strata::EventManager` lives in `app/helpers/` though it is not a helper.
@@ -1141,10 +1236,10 @@ approved **before** implementation, per CLAUDE.md.
   non-serializable object (must raise a clear error at publish, not at delivery).
 - `durable_reference?` across: `method(:x)` on a named class, on an anonymous
   class, a lambda, a proc, a callable object, `nil`.
-- `Strata::Events::Router#each_delivery`, data-driven across: a start event, a
-  transition event matching one case, matching several, matching none, and a
-  durable subscriber that is not a business process. Assert the `target_key`
-  each case produces, since that column is the uniqueness invariant.
+- `EventDelivery.stranded`, data-driven across: `enqueued_at` nil and older
+  than the threshold (stranded), nil and newer (not yet), stamped and old (a
+  slow queue, **not** stranded), and `succeeded`/`dead` (never stranded). The
+  third case is the one the earlier status-and-age scope got wrong.
 - `EventDelivery.status_for` across `:transitioned`, `:no_match`, `nil`, and an
   unrecognized value (must be `succeeded`, not `no_match`).
 
@@ -1158,27 +1253,41 @@ approved **before** implementation, per CLAUDE.md.
 - FR-3 again, via config: set `max_attempts = 2`, assert the delivery is `dead`
   after two executions. Guards the §5.8 fix; fails against a hardcoded
   `attempts: 5`.
-- FR-11: commit an event and its deliveries without enqueueing anything (the
-  stranded state), run the sweeper, assert delivery. This is the FR-1 test that
-  actually exercises the crash window — the existing FR-1 test above does not.
+- FR-11: commit an event and its deliveries without enqueueing anything and
+  with `enqueued_at` nil (the stranded state), run the sweeper, assert
+  delivery. This is the FR-1 test that actually exercises the crash window —
+  the existing FR-1 test above does not.
+- FR-11, the amplification guard: a delivery that **was** enqueued and is
+  merely slow is not re-enqueued. Fails against a status-and-age scope, which
+  would re-enqueue the whole backlog on every sweep.
 - FR-4 / `no_match`: publish a transition event for a case already past that
   step, assert the delivery is `no_match` and the case did not move. Fails
   against the original design, which recorded `succeeded`.
 - Start events: publish `<Class>Created` with `durable = true`, assert exactly
-  one delivery row with `target_key` `"start"` **and that the case is created**.
-  This is the whole intake path; without the §5.5a rule it silently creates
-  nothing.
-- Uniqueness: two start-event deliveries for one (event, subscriber) violate
-  the unique index. Fails against the original NULL-target index, which
-  accepted both.
+  one delivery row **and that the case is created**. This is the whole intake
+  path, and it silently created nothing under the publish-time-resolution
+  design unless the router carried an explicit start branch
+  ([§5.5a](#55a-why-targets-are-not-resolved-at-publish-time)).
+- Uniqueness: two deliveries for one (event, subscriber) violate the unique
+  index.
+- NFR-6: publish with N durable subscribers issues N+1 INSERTs and **no
+  SELECTs**. Fails against the router, which ran a `for_event` per subscriber.
 - §6.2: simulate failure after step change, assert rollback and that a retry
   applies the step correctly.
 - §6.1 Phase 1: a step that raises must leave the form or task saved and the
   case not advanced. Asserts the publish-boundary rescue, and is the guard
   against the propagation change landing early.
-- FR-8: two concurrent jobs on one case, assert serialized. Assert against the
-  *case* lock — a test that only proves two delivery rows were processed
-  serially would pass on the original design, which did not satisfy FR-8.
+- FR-8, layer 1: two events valid from the **same** current step, dispatched
+  concurrently. Assert exactly one transition applied, the other recorded
+  `no_match`, and — the assertion that matters — that **only one step's side
+  effects ran**. A test that only proves two delivery rows were processed
+  serially would pass on both rejected designs.
+- FR-8, the N>1 case: an `application_form_id` payload matching two cases,
+  dispatched concurrently with a second event. Assert no case is advanced
+  twice. This is the scenario the publish-time-resolution design failed, since
+  each worker locked one case and wrote both.
+- FR-8, layer 2 (same-database backends only): the queue concurrency key
+  serializes two deliveries for one case before either starts.
 - FR-10: prune an event that still has delivery rows, assert it succeeds.
   Fails without `on_delete: :cascade`.
 - A delivery whose event was pruned while its job sat in the queue: assert the
@@ -1297,8 +1406,9 @@ in a job and a raise can no longer unwind a claimant's submission. Reasoning in
 
 ### 9.2 Phase 2 — durable recording
 
-Tables, generator, models, the router ([§5.5a](#55a-target-resolution-targets_for)),
-serialization, and `publish` writing rows. Delivery stays synchronous and
+Tables, generator, models, the durable subscriber registry
+([§5.4](#54-durable-vs-in-process-subscribers)), serialization, and `publish`
+writing rows. Delivery stays synchronous and
 in-process. Satisfies the "replayable history" half of the intent, and lets the
 payload and serialization work be validated against real traffic before
 anything depends on it.
@@ -1315,7 +1425,8 @@ publishing arbitrary objects it is a rejected domain write. That is why
 ### 9.3 Phase 3 — durable delivery
 
 Job, retries, dead-lettering, idempotency, the FR-11 sweeper
-([§5.5b](#55b-recovering-stranded-deliveries-fr-11)), the case lock for FR-8,
+([§5.5b](#55b-recovering-stranded-deliveries-fr-11)), FR-8's conditional
+transition and queue concurrency key ([§5.6](#56-delivery-job-and-idempotency)),
 the per-step `retryable: false` opt-out ([§11.3](#113-at-least-once-delivery-can-double-fire-external-side-effects)),
 and §6.1's exception propagation. `Strata::Events.durable` defaults to **off**;
 hosts opt in, and a host without a durable queue backend is refused at boot
@@ -1537,9 +1648,13 @@ domain write, is in
 
 ## 12. Open questions for the team
 
-Five of the ten questions this section carried are now answered and have moved
-to [§13](#13-decision). What is left needs a person rather than a design
-choice — four of the five want a named owner, not a preference.
+**Four** of the ten questions this section carried are answered and gone;
+retention and `publish_case_event` were narrowed rather than removed, which is
+why six remain rather than five. (An earlier revision said five, because §13
+records five *decisions* — the retention default was settled while the
+retention obligation stayed open as question 1.) What is left needs a person
+rather than a design choice: four of the six want a named owner, not a
+preference.
 
 1. **Retention — what is the actual obligation?** The *default* is settled
    (`nil`, pruning opt-in — §13), so this no longer blocks a phase. It does
@@ -1591,11 +1706,23 @@ answering a fifth from the code:
 | --- | --- |
 | **A handler reports a no-op by return value** — `:transitioned` / `:no_match` — not by raising `NoMatchingTransition`. A no-op is an expected flow and does not belong in `retry_on`'s path or a host's error tracker. The callback shape subscribers *receive* is untouched, so NFR-1 holds; the return value of two SDK methods changes, and that is the accepted cost. | [§5.6a](#56a-handler-outcome-contract), [§6.4](#64-transition_to_next_step-reports-nothing-to-its-caller) |
 | **`retention_period` defaults to `nil` and pruning is opt-in**, which takes retention off Phase 2's merge gate without pretending the policy question is answered. The obligation still blocks any host enabling pruning. | [§5.8](#58-configuration), [§8.1](#81-event-payloads-are-a-new-pii-sink), [§11.1](#111-retention-and-encryption-requirements-are-unconfirmed) |
-| **Delivery targets resolve at publish time**, so a delivery row is per (subscriber, case). That is what makes FR-7 per-case and `for_target` work without re-resolving; the accepted cost is the router, the double `Case.for_event` call, and a case created between publish and delivery receiving nothing. | [§5.5a](#55a-target-resolution-targets_for) |
+| ~~Delivery targets resolve at publish time~~ — **reversed in round 3.** Review showed FR-8 was unmet under it and the cause was structural: targets were resolved at publish for the row and again at delivery for the dispatch, so the lock never covered the write set. Targets now resolve once, at delivery time. | [§5.5a](#55a-why-targets-are-not-resolved-at-publish-time) |
 | **Per-step `retryable: false` ships with Phase 3.** Documentation and a low `max_attempts` reduce the chance of a duplicate payment; this is the only control that prevents one. Still to design — see §11.3. | [§11.3](#113-at-least-once-delivery-can-double-fire-external-side-effects), [§9.3](#93-phase-3--durable-delivery) |
 | **`publish` returns the `Strata::Event`.** Not a judgement call: no caller in the engine, the dummy app or the suite reads the current return value. | [§5.5](#55-publish-path) |
 
-[§12](#12-open-questions-for-the-team) carries what is left. Four of those five
+Three more were settled in round 3, after review found FR-8 still unmet:
+
+| Decision | Where |
+| --- | --- |
+| **Targets resolve once, at delivery time**, and a delivery row is one per (event, subscriber). This removes the router, three columns, the three `target_key` sentinels, `with_locked_target`, `for_target`, `owner_of`, the second `Case.for_event` call, and the start-event branch that could otherwise silently create zero cases for every new application. It also makes NFR-6 true, which the router contradicted. Accepted costs: `no_match` and FR-7 become per (event, subscriber) rather than per case, and replay is coarser. | [§5.5a](#55a-why-targets-are-not-resolved-at-publish-time) |
+| **FR-8 is served by a conditional UPDATE on the step the handler read, plus a queue concurrency key where the backend provides one.** Not a lock held across step execution: `FOR UPDATE` ties lock duration to third-party latency, which is why workflow engines rarely use it. `current_step` is the version token, so no migration is needed — with the stated weakness that it is not monotonic, so a transition cycle can defeat it. Layer 2 additionally supplies per-case ordering, which [§5.7](#57-ordering) otherwise declines to promise. | [§5.6](#56-delivery-job-and-idempotency), [§5.7](#57-ordering) |
+| **`enqueued_at` distinguishes a lost enqueue from a slow queue.** Without it, `stranded` keys on status and age alone, so during any backlog every sweep re-enqueues the entire backlog into a queue that is already behind. The residual race fails safe: killed between enqueue and stamp leaves it nil, costing one duplicate job that FR-7 absorbs. | [§5.5b](#55b-recovering-stranded-deliveries-fr-11) |
+
+Two of these reverse earlier entries in this table rather than refining them,
+and both reversals came from the same root cause — a design that resolved the
+same thing twice and let the two answers drift apart.
+
+[§12](#12-open-questions-for-the-team) carries what is left. Four of those six
 want a named owner rather than a decision — retention obligation, encryption at
 rest, the `no_match` readership, and the `legacy_publish` timeline — which is
 the shape of the remaining risk in this work: the design is settled well ahead
