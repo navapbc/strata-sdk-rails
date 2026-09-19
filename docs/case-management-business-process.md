@@ -87,6 +87,39 @@ kase.business_process_instance.current_step
 # => "verify_identity"
 ```
 
+## Step failures
+
+A step that raises now **stops the case from advancing**, and the error is
+logged. Previously the error was swallowed: the case moved to the next step
+anyway, the work never happened, and nothing was recorded. Those failures were
+always happening — they were simply invisible.
+
+Two things change for an existing application:
+
+- **Errors you already had become visible.** Expect log lines, and possibly
+  support questions, for steps that have been failing silently. This is the
+  first honest measurement, not a regression.
+- **A failed step leaves the case where it was**, rather than one step ahead of
+  work that never ran. That is what makes the event replayable: publishing it
+  again applies the transition, where before the case was stuck with no way
+  back.
+
+What does **not** change: the record whose save published the event is still
+saved. A failing step does not reject an application form or roll back a task
+update. The step change is rolled back on its own, and the error is logged at
+the publish boundary.
+
+```ruby
+# A step that raises:
+form.submit_application        # => true, the form is saved
+kase.business_process_instance.current_step
+# => "verify_identity"         # unchanged, not advanced past the failure
+```
+
+Steps no longer swallow `Interrupt` or `SignalException` either, so a process
+running a step can be interrupted and terminates on a deploy signal as it
+should.
+
 ## Next Steps
 
 1. [Add custom task implementations](../lib/generators/strata/task/USAGE)

@@ -146,18 +146,36 @@ module Strata
         transitions.values.flat_map(&:keys).uniq | start_events.keys
       end
 
+      # Dispatches an event to the cases it resolves to.
+      #
+      # @param event [Hash] The event, as { name:, payload: }
+      # @return [Symbol] :transitioned if any case moved, :no_match if none did
       def handle_event(event)
         Rails.logger.debug "Handling event: #{event[:name]} with payload: #{event[:payload]}"
 
-        if start_event?(event[:name])
+        return start_case_from_event(event) if start_event?(event[:name])
+
+        outcomes = case_class.for_event(event).map do |kase|
+          kase.business_process_instance.transition_to_next_step(event)
+        end
+
+        # An empty result is a no_match, not a vacuous success — a payload
+        # whose case_id matches nothing at all is the case most worth seeing.
+        outcomes.include?(:transitioned) ? :transitioned : :no_match
+      end
+
+      # Creates the case a start event calls for and runs its start step, in one
+      # transaction.
+      #
+      # create_case_from_event saves the case, so rolling back only the start
+      # step would leave a case row with no step: stuck, and not replayable,
+      # because a retry's start handler would create a second case.
+      def start_case_from_event(event)
+        case_class.transaction(requires_new: true) do
           kase = create_case_from_event(event)
           kase.business_process_instance.start_from_event(event)
-        else
-          cases = case_class.for_event(event)
-          cases.each do |kase|
-            kase.business_process_instance.transition_to_next_step(event)
-          end
         end
+        :transitioned
       end
 
       def from_event(event)

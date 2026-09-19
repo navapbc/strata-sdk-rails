@@ -63,6 +63,83 @@ RSpec.describe Strata::BusinessProcess do
     end
   end
 
+  # Covers Phase 1 item 1.3, per spec.md 6.4 and 5.6a. handle_event aggregates
+  # over the cases the event resolved to, so the Phase 3 delivery job can tell
+  # applied work from a no-op instead of filing every no-op as succeeded.
+  describe '#handle_event return value' do
+    let(:event) { { name: 'event1', payload: { case_id: kase.id } } }
+
+    before { application_form.save! }
+
+    # D9: the `private` above the second `class << self` block in
+    # business_process.rb applies to instance methods, so it privatizes nothing
+    # here. Pinned because the Phase 2 router calls these as public methods.
+    it 'is a public class method, despite the private keyword above it' do
+      expect(business_process).to respond_to(:handle_event)
+      expect(business_process).to respond_to(:start_event?)
+    end
+
+    context 'when a case transitioned' do
+      it 'returns :transitioned' do
+        expect(business_process.handle_event(event)).to eq(:transitioned)
+      end
+    end
+
+    context 'when the event matches a case but no transition applies' do
+      it 'returns :no_match' do
+        stale_event = { name: 'event3', payload: { case_id: kase.id } }
+
+        expect(business_process.handle_event(stale_event)).to eq(:no_match)
+      end
+
+      it 'leaves the case where it was' do
+        business_process.handle_event({ name: 'event3', payload: { case_id: kase.id } })
+
+        expect(kase.reload.business_process_current_step).to eq('staff_task')
+      end
+    end
+
+    # The case most worth seeing: a payload whose case_id matches nothing at
+    # all. An empty for_event result is a no_match, not a vacuous success.
+    context 'when the event matches no case' do
+      it 'returns :no_match' do
+        orphan_event = { name: 'event1', payload: { case_id: SecureRandom.uuid } }
+
+        expect(business_process.handle_event(orphan_event)).to eq(:no_match)
+      end
+    end
+
+    context 'when the event resolves to several cases' do
+      let(:other_form) { TestApplicationForm.create! }
+      let(:other_case) { TestCase.find_by(application_form_id: other_form.id) }
+
+      it 'returns :transitioned when any one of them moved' do
+        other_case.update!(business_process_current_step: 'applicant_task')
+        allow(TestCase).to receive(:for_event).and_return(TestCase.where(id: [ kase.id, other_case.id ]))
+
+        expect(business_process.handle_event(event)).to eq(:transitioned)
+      end
+
+      it 'returns :no_match when none of them moved' do
+        kase.update!(business_process_current_step: 'applicant_task')
+        other_case.update!(business_process_current_step: 'applicant_task')
+        allow(TestCase).to receive(:for_event).and_return(TestCase.where(id: [ kase.id, other_case.id ]))
+
+        expect(business_process.handle_event(event)).to eq(:no_match)
+      end
+    end
+
+    context 'when the event is a start event' do
+      it 'returns :transitioned' do
+        new_form = TestApplicationForm.create!
+        start_event = { name: 'TestApplicationFormCreated',
+                        payload: { application_form_id: new_form.id } }
+
+        expect(business_process.handle_event(start_event)).to eq(:transitioned)
+      end
+    end
+  end
+
   describe '#stop_listening_for_events' do
     before do
       application_form.save!

@@ -139,6 +139,31 @@ RSpec.describe Strata::Case, type: :model do
         expect(TestCase.for_event(event)).to eq(TestCase.none)
       end
     end
+
+    # Covers Phase 1 item 1.4, per spec.md 6.3. for_event tests
+    # `payload.key?(:case_id)` with symbol keys, so any serialization that
+    # stringifies keys makes it return none for every event — every delivery
+    # succeeds, no case moves, and nothing raises. This is the failure mode
+    # most likely to survive a code review, so the contract is pinned here
+    # before Phase 2 touches serialization.
+    context 'when the payload uses string keys instead of symbols' do
+      {
+        'case_id' => :id,
+        'application_form_id' => :application_form_id
+      }.each do |payload_key, attribute|
+        it "does not match on #{payload_key}, which is why serialization must preserve symbol keys" do
+          event = { payload: { payload_key => test_case.public_send(attribute) } }
+
+          expect(TestCase.for_event(event)).to eq(TestCase.none)
+        end
+      end
+
+      it 'does not raise on a nil value either, because the key is never seen' do
+        event = { payload: { 'case_id' => nil } }
+
+        expect { TestCase.for_event(event) }.not_to raise_error
+      end
+    end
   end
 
   describe '.actionable scope' do
