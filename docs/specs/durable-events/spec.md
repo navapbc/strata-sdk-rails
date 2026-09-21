@@ -148,8 +148,8 @@ Every durable subscriber receives an event at least once. A job may run more
 than once if a worker completes the handler but loses its acknowledgement.
 
 The delivery job locks the delivery row and returns immediately when that row
-is already `succeeded`. This prevents a completed `(event, subscriber)` pair
-from being applied again.
+is terminal (`succeeded`, `no_match`, or `dead`). An explicit operator replay
+first resets the delivery to a runnable status.
 
 ### Atomic database state
 
