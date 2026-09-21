@@ -72,9 +72,9 @@ that published it.
 
 Concretely, when this is done:
 
-- Once `publish` returns, the event is durably recorded and **will** be handled,
-  even if the publishing process is killed immediately afterwards — at-least-once
-  delivery rather than best-effort.
+- Once the publisher's outermost transaction commits, the event is durably
+  recorded and **will** be handled even if the publishing process is killed
+  immediately afterward — at-least-once delivery rather than best-effort.
 - A handler that fails is retried rather than silently dropped.
 - Published events are queryable after the fact, so an operator can see what was
   published, what was handled, what failed, and replay what needs replaying —
