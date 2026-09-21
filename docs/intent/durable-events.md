@@ -190,7 +190,7 @@ ones currently absorbing the cost of a stuck case.
   own intent.
 
   *(Update, after design: the ActiveJob design chosen in
-  [the spec](../specs/durable-events/spec.md#510-cross-process-delivery-is-a-consequence-not-a-feature)
+  [the spec](../specs/durable-events/spec.md#subscriber-types)
   closes this for durable subscribers as a side effect — a worker handles the
   job regardless of which process published. Only anonymous lambda subscribers
   remain in-process. This was not a goal; it is a consequence, recorded here so
