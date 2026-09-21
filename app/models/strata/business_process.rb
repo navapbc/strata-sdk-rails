@@ -151,13 +151,16 @@ module Strata
 
         if start_event?(event[:name])
           kase = create_case_from_event(event)
-          kase.business_process_instance.start_from_event(event)
+          return kase.business_process_instance.start_from_event(event)
         else
-          cases = case_class.for_event(event)
-          cases.each do |kase|
+          outcomes = case_class.for_event(event).map do |kase|
             kase.business_process_instance.transition_to_next_step(event)
           end
+
+          return :transitioned if outcomes.include?(:transitioned)
         end
+
+        :no_match
       end
 
       def from_event(event)

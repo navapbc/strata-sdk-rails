@@ -63,6 +63,39 @@ RSpec.describe Strata::BusinessProcess do
     end
   end
 
+  describe '#handle_event return value' do
+    before do
+      application_form.save!
+    end
+
+    it 'returns :transitioned when a case moves' do
+      event = { name: 'event1', payload: { case_id: kase.id } }
+
+      expect(business_process.handle_event(event)).to eq(:transitioned)
+    end
+
+    it 'returns :no_match when a resolved case does not move' do
+      event = { name: 'event3', payload: { case_id: kase.id } }
+
+      expect(business_process.handle_event(event)).to eq(:no_match)
+    end
+
+    it 'returns :no_match when the event resolves no cases' do
+      event = { name: 'event1', payload: { case_id: SecureRandom.uuid } }
+
+      expect(business_process.handle_event(event)).to eq(:no_match)
+    end
+
+    it 'returns :transitioned when any resolved case moves' do
+      other_case = create(:test_case)
+      other_case.update!(business_process_current_step: 'applicant_task')
+      allow(TestCase).to receive(:for_event).and_return([ kase, other_case ])
+      event = { name: 'event1', payload: { case_id: kase.id } }
+
+      expect(business_process.handle_event(event)).to eq(:transitioned)
+    end
+  end
+
   describe '#stop_listening_for_events' do
     before do
       application_form.save!
