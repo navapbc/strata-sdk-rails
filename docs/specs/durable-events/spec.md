@@ -49,7 +49,7 @@ flowchart LR
   J -->|attempts exhausted| K["dead"]
 ```
 
-The public API stays the same:
+The public method signatures and subscriber input stay the same:
 
 - `publish(event_key, payload = {})`
 - `subscribe(event_key, callback)`
@@ -57,8 +57,10 @@ The public API stays the same:
 - `unsubscribe_all`
 - Subscriber input remains `{ name:, payload: }`.
 
-`publish` will return the persisted `Strata::Event`. Existing SDK and dummy-app
-callers do not depend on its current return value.
+`publish` currently returns `nil`; it will return the persisted
+`Strata::Event`. This return-value change is a breaking API change, even though
+existing SDK and dummy-app callers do not depend on the current return value.
+Host applications must review callers before upgrading.
 
 ## Subscriber types
 
@@ -90,6 +92,7 @@ Stores one row per `(event, subscriber)` with:
 - subscriber key;
 - status;
 - attempt count;
+- `next_attempt_at`;
 - `enqueued_at`;
 - last error;
 - completion time.
@@ -100,13 +103,14 @@ Delivery statuses are:
 | --- | --- |
 | `pending` | Recorded but not completed. |
 | `succeeded` | The subscriber completed and applied work, or returned an unrecognized success value. |
-| `failed` | The latest attempt raised and another retry may occur. |
+| `failed` | The latest attempt raised. A non-null `next_attempt_at` means another retry is required. |
 | `no_match` | The subscriber ran but no transition matched. |
 | `dead` | Retries were exhausted or the payload can no longer be deserialized. Operator action is required. |
 
 A unique database index prevents duplicate rows for the same event and
 subscriber. The event foreign key uses `ON DELETE CASCADE` so pruning an event
-also removes its deliveries.
+also removes its deliveries. An index covering status, `next_attempt_at`, and
+`enqueued_at` supports the stranded-attempt sweeper.
 
 Targets are deliberately not stored on delivery rows. Cases are resolved once,
 inside the handler at delivery time. This avoids duplicate routing, supports
@@ -195,24 +199,53 @@ disappearing silently. The host application team monitors these outcomes and
 replays an event when appropriate. Queue-level ordering is deferred unless
 production evidence shows that this operational model is insufficient.
 
-## Closing the commit-to-enqueue gap
+## Closing enqueue gaps for initial delivery and retries
 
-A process can die after its event and delivery rows commit but before
-`perform_later` creates a job. ActiveJob retry cannot help because no job
-exists yet.
+The same failure window exists when first publishing an event and when
+scheduling a retry: a process can commit the need for an attempt and die before
+`perform_later` creates its job. ActiveJob's `retry_on` is not sufficient for
+handler failures because its next enqueue is not represented durably in the
+delivery row.
 
-After a successful enqueue, the publisher stamps `enqueued_at`. A scheduled
-sweeper re-enqueues only old `pending` deliveries whose `enqueued_at` is still
-`nil`. This distinguishes a lost enqueue from a job that is merely waiting in
-a slow queue.
+Strata therefore owns retry scheduling instead of using `retry_on` for handler
+errors. The delivery row is the durable schedule for every attempt:
+
+1. A newly published delivery is `pending`, with `next_attempt_at` set to the
+   publication time and `enqueued_at` set to `nil`.
+2. If a handler raises, its work rolls back. In a separate transaction, the
+   job records the failed attempt and error. When attempts remain, it sets
+   `status = failed`, calculates the backoff in `next_attempt_at`, and clears
+   `enqueued_at` before committing. When attempts are exhausted or the step is
+   not retryable, it records `dead` and clears `next_attempt_at`.
+3. Only after that transaction commits does the dispatcher schedule the job:
+
+   ```ruby
+   Strata::EventDeliveryJob
+     .set(wait_until: delivery.next_attempt_at)
+     .perform_later(delivery.id)
+   ```
+
+   It stamps `enqueued_at` only after the queue adapter accepts the job.
+4. The scheduled sweeper finds `pending` and `failed` deliveries whose
+   `next_attempt_at` is due, whose `enqueued_at` is still `nil`, and whose
+   recovery grace period has elapsed. It enqueues the missing attempt using
+   the same dispatcher.
+
+Terminal outcomes clear `next_attempt_at`; `enqueued_at` remains the timestamp
+when the most recent job was accepted by the queue.
+
+This protocol recovers a process death before the initial enqueue and a worker
+death after recording `failed` but before scheduling the retry. A delivery with
+a non-null `enqueued_at` is left to the durable queue backend, so a merely slow
+queue is not amplified.
 
 The remaining enqueue-before-stamp race fails safely: the sweeper may create
 one duplicate job, which the delivery status check absorbs.
 
-Hosts must schedule the sweeper every few minutes. Deliveries are always
-enqueued after the publisher transaction commits, including when Solid Queue
-or GoodJob uses the application's Postgres database. Sidekiq remains supported,
-and the same sweeper-backed protocol applies to every backend.
+Hosts must schedule the sweeper every few minutes. Every attempt is enqueued
+after its schedule is committed, including when Solid Queue or GoodJob uses
+the application's Postgres database. Sidekiq remains supported, and the same
+sweeper-backed protocol applies to every backend.
 
 ## Handler outcome contract
 
@@ -242,6 +275,8 @@ Important defaults and checks:
 
 - Durability is opt-in for at least the first release.
 - `max_attempts` is read at delivery time rather than frozen in the job class.
+- `stranded_after` is the grace period after `next_attempt_at` before the
+  sweeper treats an unstamped initial delivery or retry as stranded.
 - Pruning is disabled until a host chooses a retention period.
 - Enabling durability with `async`, `inline`, or an inappropriate `test`
   adapter is refused at boot.
@@ -257,7 +292,7 @@ No web console is included. Operators use rake tasks and model scopes.
 | `strata:events:status[event_id]` | Inspect an event and its deliveries. |
 | `strata:events:replay[delivery_id]` | Replay one failed or dead delivery without republishing its event. |
 | `strata:events:replay_dead[event_name]` | Replay dead deliveries in bulk. |
-| `strata:events:requeue_stranded` | Recover committed deliveries that were never enqueued. |
+| `strata:events:requeue_stranded` | Recover initial deliveries and retries whose committed attempt was never enqueued. |
 | `strata:events:prune[days]` | Delete events older than the configured or supplied age. |
 | `strata:events:check_payloads[event_name]` | Find incompatible payloads before enabling durability. |
 
@@ -301,11 +336,13 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 
 ### Phase 3: deliver durably
 
-- Add jobs, retries, dead-lettering, replay, and the stranded-delivery sweeper.
+- Add jobs, durable per-attempt retry scheduling, dead-lettering, replay, and
+  the stranded-delivery sweeper.
 - Add conditional transitions to prevent competing events from both advancing
   the same current step.
 - Add `retryable: false` to process steps.
-- Let handler exceptions propagate to ActiveJob.
+- Let handler exceptions propagate to the delivery job so it can roll back the
+  handler transaction, persist the next attempt, and schedule it durably.
 - Keep durability off by default until it has field experience.
 
 ## Host upgrade checklist
@@ -364,13 +401,21 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 - **When** the workflow advances from A to B and later returns to A at version 3
 - **Then** the stale job's conditional update fails and it runs no side effects.
 
-### Lost enqueue is recovered without amplifying a slow queue
+### Lost initial or retry enqueue is recovered without amplifying a slow queue
 
-- **Given** an old pending delivery has never been stamped `enqueued_at`
+- **Given** a pending delivery is due, its recovery grace period has elapsed,
+  and it has never been stamped `enqueued_at`
 - **When** the sweeper runs
 - **Then** it enqueues that delivery.
 
-- **Given** an old pending delivery was already enqueued
+- **Given** a handler failure was recorded with a due `next_attempt_at` and its
+  recovery grace period has elapsed
+- **And** the worker died before enqueueing the retry, leaving `enqueued_at`
+  null
+- **When** the sweeper runs
+- **Then** it enqueues the missing retry.
+
+- **Given** a pending or failed delivery was already enqueued
 - **When** the sweeper runs
 - **Then** it does not enqueue a duplicate merely because the queue is slow.
 
@@ -433,9 +478,10 @@ Resolved:
 6. **Remove `strata:events:publish_case_event`.** No host application uses the
    task, and its current payload does not drive a transition. Delete it rather
    than porting ineffective behavior to durable delivery.
-7. **Always enqueue after commit.** Every supported queue backend follows the
-   same protocol: commit the event and delivery rows, then enqueue deliveries.
-   The required sweeper recovers a process failure between those operations.
+7. **Always enqueue every attempt after commit.** Every supported queue backend
+   follows the same protocol: commit the initial delivery or next retry time,
+   then enqueue that attempt. The required sweeper recovers a process failure
+   between those operations for both initial delivery and retries.
    Same-database queues do not use a separate in-transaction optimization.
 8. **Publication ordering is not guaranteed.** The initial design does not use
    queue-level per-case concurrency. Conditional database updates prevent two
