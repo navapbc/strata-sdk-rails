@@ -153,7 +153,9 @@ than once if a worker completes the handler but loses its acknowledgement.
 
 The delivery job locks the delivery row and returns immediately when that row
 is terminal (`succeeded`, `no_match`, or `dead`). An explicit operator replay
-first resets the delivery to a runnable status.
+resets `status` to `pending`, resets the attempt count, clears `enqueued_at`
+and the completion timestamp, sets `next_attempt_at` to the current time, and
+then uses the same dispatcher as every other attempt.
 
 ### Atomic database state
 
@@ -183,8 +185,16 @@ Case.where(
 )
 ```
 
-Only one competing transition can update the expected step. A loser runs no
-step side effects and reports `no_match`.
+Only one competing transition can update the expected step. When the update
+affects zero rows, the handler reloads the case and re-evaluates the event
+against fresh state before trying again. It makes at most three conditional
+update attempts. No step side effects run before an update succeeds.
+
+If the event does not match the freshly loaded step, the handler reports
+`no_match`. If the event still matches but loses all three conditional updates,
+the handler raises a retryable transition conflict; the durable attempt
+scheduler records `failed` and retries it with backoff. Contention therefore
+does not create a terminal `no_match` by itself.
 
 The version must increase on every transition and must never be reset when a
 process revisits a step. This preserves the existing DSL's support for cyclic
@@ -236,16 +246,18 @@ when the most recent job was accepted by the queue.
 
 This protocol recovers a process death before the initial enqueue and a worker
 death after recording `failed` but before scheduling the retry. A delivery with
-a non-null `enqueued_at` is left to the durable queue backend, so a merely slow
-queue is not amplified.
+a non-null `enqueued_at` is left to the queue backend, so durable mode requires
+a backend that recovers a claimed job after its worker dies. Solid Queue and
+GoodJob meet that requirement. Sidekiq is supported only with Sidekiq Pro's
+`super_fetch`; Sidekiq OSS does not satisfy the at-least-once guarantee.
 
 The remaining enqueue-before-stamp race fails safely: the sweeper may create
 one duplicate job, which the delivery status check absorbs.
 
 Hosts must schedule the sweeper every few minutes. Every attempt is enqueued
 after its schedule is committed, including when Solid Queue or GoodJob uses
-the application's Postgres database. Sidekiq remains supported, and the same
-sweeper-backed protocol applies to every backend.
+the application's Postgres database. The sweeper and the backend's orphan-job
+recovery together provide the delivery guarantee.
 
 ## Handler outcome contract
 
@@ -259,7 +271,11 @@ SDK business-process handlers report whether work happened:
 - Any other host return value is treated as success for compatibility.
 
 `no_match` is per `(event, subscriber)`, not per case. An event resolving to
-several cases is `succeeded` when at least one case moves.
+several cases is `succeeded` when at least one case moves. To keep partial
+application observable without restoring per-case delivery rows, a business
+process handler emits one structured outcome log per resolved case. Each entry
+includes at least the event name, subscriber key, case type, case ID, and
+`:transitioned` or `:no_match` outcome.
 
 ## Configuration
 
@@ -273,13 +289,16 @@ Strata::Events.retention_period = nil
 
 Important defaults and checks:
 
-- Durability is opt-in for at least the first release.
+- Durability defaults to off in the first release and on in the following
+  release, as recorded in resolved decision 3.
 - `max_attempts` is read at delivery time rather than frozen in the job class.
 - `stranded_after` is the grace period after `next_attempt_at` before the
   sweeper treats an unstamped initial delivery or retry as stranded.
 - Pruning is disabled until a host chooses a retention period.
 - Enabling durability with `async`, `inline`, or an inappropriate `test`
   adapter is refused at boot.
+- Supported production backends must recover jobs claimed by a worker that
+  dies. Solid Queue and GoodJob qualify; Sidekiq requires Pro `super_fetch`.
 - Missing event tables produce one boot-time warning and fall back to today's
   behavior instead of crashing the host.
 
@@ -317,6 +336,12 @@ rescue keeps the form or task saved while rolling back the failed case step.
 
 ## Delivery plan
 
+| Phase | Guarantees introduced |
+| --- | --- |
+| Phase 1 | Step mutation and execution are atomic; handlers report whether a transition occurred; the temporary publish-boundary rescue protects the originating domain write. |
+| Phase 2 | Events and subscriber deliveries are persisted with the publisher transaction; payload and subscriber compatibility are validated; delivery remains synchronous. |
+| Phase 3 | ActiveJob delivery is at least once; retries, dead-lettering, replay, concurrency control, stranded-attempt recovery, and backend orphan recovery are operational. |
+
 ### Phase 1: make current transitions safe
 
 - Make step mutation and execution transactional.
@@ -343,7 +368,8 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 - Add `retryable: false` to process steps.
 - Let handler exceptions propagate to the delivery job so it can roll back the
   handler transaction, persist the next attempt, and schedule it durably.
-- Keep durability off by default until it has field experience.
+- Ship with durability defaulting off, then default it on in the following
+  release as recorded in resolved decision 3.
 
 ## Host upgrade checklist
 
@@ -356,7 +382,8 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
    tables.
 6. Audit every external system callback for idempotency; mark unsafe steps
    `retryable: false` when appropriate.
-7. Configure a durable ActiveJob backend: Solid Queue, GoodJob, or Sidekiq.
+7. Configure an orphan-recovering ActiveJob backend: Solid Queue, GoodJob, or
+   Sidekiq Pro with `super_fetch` enabled.
 8. Schedule `strata:events:requeue_stranded` every few minutes.
 9. Set `Strata::Events.durable = true` before subscriptions register.
 10. Update synchronous-delivery tests using `Strata::Events::TestHelpers` and
@@ -390,16 +417,31 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 - **When** the same job runs again
 - **Then** it returns without advancing the case or repeating step work.
 
-### Competing transitions do not both run
+### Concurrent transitions re-evaluate fresh state
 
 - **Given** two events are valid from the same current step
 - **When** their jobs run concurrently
-- **Then** one transition applies, only that transition's side effects run,
-  and the other delivery records `no_match`.
+- **Then** one conditional update wins and only its step side effects run
+  before the losing handler reloads the case.
+- **And** the losing handler applies its event if it matches the new step;
+  otherwise it records `no_match` against that fresh state.
+
+- **Given** an event continues to match but loses three conditional updates
+- **When** the third conflict occurs
+- **Then** it raises a retryable transition conflict rather than recording
+  `no_match`.
 
 - **Given** a stale job read step A at transition version 1
 - **When** the workflow advances from A to B and later returns to A at version 3
-- **Then** the stale job's conditional update fails and it runs no side effects.
+- **Then** the stale job's conditional update fails, runs no side effects from
+  stale state, and re-evaluates the event against step A at version 3.
+
+### Partial multi-case outcomes remain observable
+
+- **Given** an event resolves to several cases and only some transition
+- **When** the handler completes
+- **Then** the delivery is `succeeded` when at least one case moved
+- **And** one structured log entry records the outcome for every resolved case.
 
 ### Lost initial or retry enqueue is recovered without amplifying a slow queue
 
@@ -418,6 +460,18 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 - **Given** a pending or failed delivery was already enqueued
 - **When** the sweeper runs
 - **Then** it does not enqueue a duplicate merely because the queue is slow.
+
+### A worker killed during a handler does not lose the delivery
+
+- **Given** a queue backend with orphan recovery accepted a delivery job
+- **When** its worker dies after claiming the job but before completion
+- **Then** the backend makes the job available again and the delivery is
+  eventually attempted.
+
+- **Given** a host uses Sidekiq OSS without `super_fetch`
+- **When** it enables durable events
+- **Then** its configuration is unsupported because it cannot provide the
+  at-least-once guarantee.
 
 ### Payload compatibility is preserved
 
@@ -468,8 +522,8 @@ Resolved:
    `Strata::Events.durable` defaults to `false` in the first release and
    defaults to `true` in the following release.
 4. **Each host application team owns `no_match` monitoring.** Host teams must
-   watch their production counts, define alert thresholds, and investigate
-   unexpected increases.
+   watch their production counts and per-case structured outcome logs, define
+   alert thresholds, and investigate unexpected increases.
 5. **Durable mode rejects anonymous subscribers.** Lambdas, procs, and other
    non-addressable callables continue to work only while durability is
    disabled. When durability is enabled, registration fails with a migration
@@ -481,8 +535,10 @@ Resolved:
 7. **Always enqueue every attempt after commit.** Every supported queue backend
    follows the same protocol: commit the initial delivery or next retry time,
    then enqueue that attempt. The required sweeper recovers a process failure
-   between those operations for both initial delivery and retries.
-   Same-database queues do not use a separate in-transaction optimization.
+   between those operations for both initial delivery and retries. Supported
+   backends must also recover jobs claimed by a worker that dies; Sidekiq
+   requires Pro `super_fetch`, and Sidekiq OSS is unsupported. Same-database
+   queues do not use a separate in-transaction optimization.
 8. **Publication ordering is not guaranteed.** The initial design does not use
    queue-level per-case concurrency. Conditional database updates prevent two
    events from winning the same transition; an event that arrives too early is
