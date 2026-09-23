@@ -5,9 +5,11 @@
 Draft for engineering review. [`spec.md`](./spec.md) defines the behavior; this
 plan defines the implementation order and proof. Keep this branch plan-only.
 
-Implement each slice as a small stacked PR. Every slice must pass its focused
-tests and the full suite before the next slice starts. If implementation changes
-the design, update the spec and this plan first.
+This plan produces **six stacked implementation PRs**, one for each numbered
+section below. Including this plan-only PR, the stack contains **seven PRs in
+total**. Every implementation PR must pass its focused tests and the full suite
+before the next one starts. If implementation changes the design, update the
+spec and this plan first.
 
 ## Guardrails
 
@@ -27,7 +29,7 @@ the design, update the spec and this plan first.
 
 ## Files that change
 
-### 1. Handler outcomes
+### Implementation PR 1: Handler outcomes
 
 Files:
 
@@ -46,7 +48,7 @@ Proof:
 - No matching transition returns `:no_match`.
 - Mixed multi-case results return `:transitioned` and log every case outcome.
 
-### 2. Safe synchronous transitions
+### Implementation PR 2: Safe synchronous transitions
 
 Files:
 
@@ -71,7 +73,7 @@ Proof:
 - The publishing form or task remains committed.
 - Non-`StandardError` exceptions still propagate.
 
-### 3. Durable records with synchronous delivery
+### Implementation PR 3: Durable records with synchronous delivery
 
 Schema and generator files:
 
@@ -127,7 +129,7 @@ Proof:
 - Commit persists the event and deliveries; rollback persists nothing.
 - Synchronous outcomes become `succeeded`, `no_match`, or visible `failed`.
 
-### 4. Concurrency and retry policy
+### Implementation PR 4: Concurrency and retry policy
 
 Files:
 
@@ -159,7 +161,7 @@ Proof:
 - A stale A-to-B-to-A worker cannot update the newer version.
 - Every step helper propagates its retry policy.
 
-### 5. ActiveJob delivery and recovery
+### Implementation PR 5: ActiveJob delivery and recovery
 
 Files:
 
@@ -208,7 +210,7 @@ Proof:
 - Replay resets and dispatches the same delivery without republishing.
 - Payload preflight catches an unserializable host sample before rollout.
 
-### 6. Supported backend and rollout documentation
+### Implementation PR 6: Supported backend and rollout documentation
 
 Files:
 
