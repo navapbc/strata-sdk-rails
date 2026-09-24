@@ -11,6 +11,12 @@ total**. Every implementation PR must pass its focused tests and the full suite
 before the next one starts. If implementation changes the design, update the
 spec and this plan first.
 
+This supersedes the earlier durable events plan on
+[PR #379](https://github.com/navapbc/strata-sdk-rails/pull/379), which was
+closed unmerged. Its code reconnaissance is carried forward in
+[Known corrections and house style](#known-corrections-and-house-style);
+nothing else from it is still current.
+
 ## Guardrails
 
 - Keep `Strata::Events.durable = false` for the first release.
@@ -26,6 +32,54 @@ spec and this plan first.
 - Payload preflight must exercise host-provided publisher samples before
   rollout. Scanning stored events alone is insufficient because an
   unserializable payload never creates an event row.
+
+## Known corrections and house style
+
+`spec.md` was distilled before it merged and no longer carries DDL or generator
+detail, so the following is settled here. Each item was verified against the
+code on `main`.
+
+- **The generator precedent is `strata:audit_log`, not `strata:task`.**
+  `lib/generators/strata/audit_log/audit_log_generator.rb` is a
+  `Rails::Generators::Base` whose only job is installing a migration, with the
+  model shipped by the engine — exactly this case. `strata:task` is a
+  `NamedBase` that also writes a model, so it is the wrong pattern to copy.
+- **Declare columns raw and add the cascade separately.** No `strata_*`
+  migration or generator template in this repo uses `t.references`. The house
+  form is `t.uuid :event_id` plus an explicit
+  `add_foreign_key :strata_event_deliveries, :strata_events, on_delete: :cascade`
+  after the `create_table` block, as in
+  `spec/dummy/db/migrate/20250327160205_create_passport_cases.rb:14`. The
+  cascade is load-bearing: pruning raises `ActiveRecord::InvalidForeignKey`
+  without it.
+- **Append-only rows carry one timestamp.** `strata_audit_lines` and
+  `strata_determinations` declare a bare `t.datetime :created_at, null: false`
+  rather than `t.timestamps`. `strata_events` follows them. Deliveries are
+  mutable, so their `t.timestamps` is correct.
+- **UUID keys carry their default:**
+  `id: :uuid, default: -> { "gen_random_uuid()" }`, as in
+  `create_strata_audit_lines.rb`. `create_strata_determinations.rb` omits the
+  default and the engine's own `create_strata_tasks.rb.tt` does too, so follow
+  `spec/dummy/db/schema.rb` rather than the nearest template.
+- **Factories are named `*_factory.rb`.** Every file in
+  `spec/factories/strata/` and `spec/dummy/spec/factories/` follows it, and
+  engine factories are registered from `lib/strata/engine.rb`. Strata models use
+  the `strata_` prefix (`strata_task_factory.rb`,
+  `strata_audit_line_factory.rb`).
+- **There is no ActiveJob infrastructure to build on.** No `perform_later`
+  exists in the engine or the dummy app, no environment configures a queue
+  adapter, no background-job gem is in `Gemfile` or `strata.gemspec`,
+  `Strata::ApplicationJob` is an empty subclass, and `ActiveJob::TestHelper` is
+  not included anywhere — so `perform_enqueued_jobs` is unavailable until
+  Implementation PR 6 adds it. Implementation PR 5 must assume none of it
+  exists.
+- **`handle_event` is public despite appearances.**
+  `app/models/strata/business_process.rb` writes `private` and then opens
+  `class << self`. `private` governs instance methods, so `handle_event`,
+  `create_case_from_event`, and `start_event?` are all public class methods.
+  Durable subscriber keys depend on that, so make the visibility explicit
+  rather than leaving it resting on a coincidence that a later cleanup could
+  remove.
 
 ## Files that change
 
@@ -99,7 +153,8 @@ Runtime files:
 - `app/lib/strata/events/delivery_runner.rb`
 - `app/helpers/strata/event_manager.rb`
 - `lib/strata/engine.rb`
-- `spec/factories/strata/events.rb`
+- `spec/factories/strata/strata_event_factory.rb`
+- `spec/factories/strata/strata_event_delivery_factory.rb`
 - `spec/models/strata/event_spec.rb`
 - `spec/models/strata/event_delivery_spec.rb`
 - `spec/lib/strata/events_spec.rb`
@@ -257,6 +312,32 @@ The final integration suite must cover:
 6. Missing initial/retry enqueue recovery without slow-queue amplification.
 7. Replay and pruning.
 8. Missing-table fallback and unsupported-adapter failure.
+
+## Test environment facts
+
+None of these are visible from the suite, and each one constrains the work
+above:
+
+- **The suite uses transactional fixtures** (`spec/rails_helper.rb:68`), not
+  DatabaseCleaner. Confirm that `ActiveRecord.after_all_transactions_commit`
+  fires under them before Implementation PR 5 is built on it. A negative result
+  invalidates the dispatch path, so spike it first.
+- **`spec/support` is not glob-loaded.** The glob at `spec/rails_helper.rb:45`
+  is commented out, so new matchers and helpers must be required per spec, the
+  way `publish_event_with_payload` is today.
+- **`PassportBusinessProcess` is subscribed for the whole suite.**
+  `spec/dummy/config/application.rb:40` starts it listening inside
+  `config.after_initialize`, so any spec that saves a `PassportApplicationForm`
+  creates a `PassportCase` through the event path whether it asserts on it or
+  not. Changing delivery timing therefore reaches past the specs named in each
+  PR above — at least `spec/models/strata/task_spec.rb`,
+  `spec/models/strata/application_form_spec.rb`,
+  `spec/dummy/spec/models/passport_application_form_spec.rb`,
+  `spec/policies/strata/application_form_policy_spec.rb`,
+  `spec/dummy/spec/views/passport_application_forms/show.html.erb_spec.rb`, and
+  `spec/dummy/spec/controllers/sample_application_forms_controller_spec.rb`.
+  `spec/factories/strata/strata_test_case_factory.rb:7` already works around it
+  with `find_or_create_by!`.
 
 ## Main risks
 
