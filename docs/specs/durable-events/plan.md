@@ -80,6 +80,28 @@ code on `main`.
   Durable subscriber keys depend on that, so make the visibility explicit
   rather than leaving it resting on a coincidence that a later cleanup could
   remove.
+- **Derive subscriber keys from the receiver, not the method owner.** Every
+  business process inherits `handle_event`, so
+  `PassportBusinessProcess.method(:handle_event).owner` is
+  `Strata::BusinessProcess`, not `PassportBusinessProcess`. A key built from
+  `owner` collapses every process onto one string: two processes subscribed to
+  the same event name then write two delivery rows with the same
+  `subscriber_key`, the unique index rejects the insert inside the publisher's
+  transaction, and the originating form or task save fails. Use
+  `method.receiver.name`, and have the registry reject duplicate keys for one
+  event name at registration time.
+- **Configuration cannot live in an autoloaded constant.** `app/lib` is an
+  autoload path, so a `Strata::Events` defined there is unloaded on every
+  reload and a host's `Strata::Events.durable = true` in an initializer is
+  discarded on the first code change in development. It belongs in
+  `lib/strata/events.rb`, required from `lib/strata.rb`, the way
+  `lib/strata/auth.rb` already is. The rest of the namespace stays in `app/lib`
+  and Zeitwerk attaches it to the module that `require` already defined.
+- **The test helper constant is `Strata::Testing::EventHelpers`**, matching
+  `Strata::Testing::ApiAuthHelpers`, and hosts must `require` it explicitly —
+  it is not autoloaded. `spec.md`'s upgrade checklist step 10 says
+  `Strata::Events::TestHelpers`; that is the spec's error and the follow-up
+  spec PR corrects it.
 
 ## Files that change
 
@@ -147,7 +169,8 @@ Runtime files:
 
 - `app/models/strata/event.rb`
 - `app/models/strata/event_delivery.rb`
-- `app/lib/strata/events.rb`
+- `lib/strata/events.rb`
+- `lib/strata.rb`
 - `app/lib/strata/events/payload.rb`
 - `app/lib/strata/events/subscriber_registry.rb`
 - `app/lib/strata/events/delivery_runner.rb`
@@ -171,9 +194,11 @@ New case migrations must also create that column with database-level
 `null: false, default: 0`; updating the model attribute alone is not enough.
 
 Use `ActiveJob::Arguments` for payloads. Register only named class/module
-methods in durable mode. Persist one event and one delivery per subscriber in
-the publisher transaction, return `Strata::Event`, and run the delivery
-synchronously for this slice. Missing tables warn once and use the legacy path.
+methods in durable mode, keying them off the subscribing constant rather than
+the defining one (see the subscriber-key correction above). Persist one event
+and one delivery per subscriber in the publisher transaction, return
+`Strata::Event`, and run the delivery synchronously for this slice. Missing
+tables warn once and use the legacy path.
 
 Proof:
 
@@ -239,8 +264,14 @@ Files:
 
 After the publisher's outermost commit, dispatch each pending delivery and set
 `enqueued_at` only after the adapter accepts it. The job locks the delivery,
-returns for terminal or early work, and runs the subscriber plus terminal
-status update in one transaction.
+returns for terminal work, and runs the subscriber plus terminal status update
+in one transaction.
+
+A job that wakes before its `next_attempt_at` must clear `enqueued_at` before
+returning. The sweeper ignores stamped rows, so returning early while stamped
+leaves the delivery due, unqueued, and invisible to recovery for good. Clock
+skew between hosts makes this reachable on ordinary retries, not just on
+duplicates.
 
 When a handler raises, roll back its transaction. In a new transaction, lock
 and re-check the delivery; do nothing if a duplicate already completed or
@@ -290,8 +321,15 @@ Proof:
 
 - Start a Solid Queue worker, block a handler after claim, kill the worker,
   restart it, and verify the delivery is attempted again.
-- Document GoodJob support and Sidekiq Pro `super_fetch`; reject Sidekiq OSS and
-  unknown/non-durable adapters when durable mode is enabled.
+- Document Solid Queue and GoodJob as the supported backends; both recover a
+  job claimed by a worker that dies, which is what the guarantee rests on.
+- Reject `inline`, `async`, and unknown adapters at boot when durable mode is
+  enabled, naming the adapter class in the error.
+- Sidekiq OSS and Sidekiq Pro present the same adapter class, so the boot check
+  cannot separate them by class alone. Either probe for Pro and an enabled
+  `super_fetch`, or accept Sidekiq with a loud warning and carry the
+  restriction in documentation — decide which before writing the check, and
+  keep the test honest about what it proves.
 
 ## Test gates
 
