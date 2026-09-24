@@ -24,6 +24,13 @@ Welcome to the Strata SDK documentation. This index provides an organized overvi
 
 - [Implementing tasks views](./implementing-tasks-views.md) - Guide for implementing prebuilt views
 
+## Intent and specs
+
+Captured intent for proposed work — what we want and why, recorded before any design or implementation — and the design specs that follow from it.
+
+- [Durable events (intent)](./intent/durable-events.md) - Make events survive the process that published them
+- [Durable events (spec)](./specs/durable-events/spec.md) - Requirements and design for the above
+
 ## Miscellaneous
 
 - [Leaving a project](./leaving-a-project.md) - Guidelines for when a Nava project team transitions off the project
