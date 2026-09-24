@@ -103,20 +103,13 @@ code on `main`.
   `Strata::Events::TestHelpers`; that is the spec's error and the follow-up
   spec PR corrects it.
 
-## Files that change
+## Implementation sequence
 
 ### Implementation PR 1: Handler outcomes
 
-Files:
-
-- `app/models/strata/business_process_instance.rb`
-- `app/models/strata/business_process.rb`
-- `spec/models/strata/business_process_instance_spec.rb`
-- `spec/models/strata/business_process_spec.rb`
-
 Return `:transitioned` or `:no_match`, aggregate multi-case results, and emit
 one structured outcome log per resolved case. Existing PR #382 supplies most
-of this slice; add the structured logging if it is not already present.
+of this PR; add the structured logging if it is not already present.
 
 Proof:
 
@@ -125,17 +118,6 @@ Proof:
 - Mixed multi-case results return `:transitioned` and log every case outcome.
 
 ### Implementation PR 2: Safe synchronous transitions
-
-Files:
-
-- `app/models/strata/business_process_instance.rb`
-- `app/models/strata/business_process.rb`
-- `app/helpers/strata/event_manager.rb`
-- `spec/models/strata/business_process_instance_spec.rb`
-- `spec/models/strata/business_process_spec.rb`
-- `spec/helpers/strata/event_manager_spec.rb`
-- `spec/models/strata/application_form_spec.rb`
-- `spec/models/strata/task_spec.rb`
 
 Wrap step mutation and execution in one transaction. Do the same for start-case
 creation and first-step execution. Stop swallowing `StandardError`, but add the
@@ -151,43 +133,6 @@ Proof:
 
 ### Implementation PR 3: Durable records with synchronous delivery
 
-Schema and generator files:
-
-- `lib/generators/strata/events/events_generator.rb`
-- `lib/generators/strata/events/templates/create_strata_events.rb.tt`
-- `lib/generators/strata/events/USAGE`
-- `lib/generators/strata/case/case_generator.rb`
-- `lib/generators/strata/migration/migration_generator.rb`
-- `app/models/strata/case.rb`
-- `spec/lib/generators/strata/generators/events_generator_spec.rb`
-- `spec/lib/generators/strata/generators/case_generator_spec.rb`
-- `spec/lib/generators/strata/generators/migration_generator_spec.rb`
-- `spec/dummy/db/migrate/<timestamp>_create_strata_events.rb`
-- `spec/dummy/db/schema.rb`
-
-Runtime files:
-
-- `app/models/strata/event.rb`
-- `app/models/strata/event_delivery.rb`
-- `lib/strata/events.rb`
-- `lib/strata.rb`
-- `app/lib/strata/events/payload.rb`
-- `app/lib/strata/events/subscriber_registry.rb`
-- `app/lib/strata/events/delivery_runner.rb`
-- `app/helpers/strata/event_manager.rb`
-- `lib/strata/engine.rb`
-- `spec/factories/strata/strata_event_factory.rb`
-- `spec/factories/strata/strata_event_delivery_factory.rb`
-- `spec/models/strata/event_spec.rb`
-- `spec/models/strata/event_delivery_spec.rb`
-- `spec/lib/strata/events_spec.rb`
-- `spec/lib/strata/events/payload_spec.rb`
-- `spec/lib/strata/events/subscriber_registry_spec.rb`
-- `spec/lib/strata/events/delivery_runner_spec.rb`
-- `spec/helpers/strata/event_manager_spec.rb`
-- `spec/lib/strata/engine_spec.rb`
-- `spec/integration/strata/durable_events_spec.rb`
-
 Generate the two tables from the spec and add
 `business_process_transition_version` to explicitly named existing case tables.
 New case migrations must also create that column with database-level
@@ -197,7 +142,7 @@ Use `ActiveJob::Arguments` for payloads. Register only named class/module
 methods in durable mode, keying them off the subscribing constant rather than
 the defining one (see the subscriber-key correction above). Persist one event
 and one delivery per subscriber in the publisher transaction, return
-`Strata::Event`, and run the delivery synchronously for this slice. Missing
+`Strata::Event`, and run the delivery synchronously at this stage. Missing
 tables warn once and use the legacy path.
 
 Proof:
@@ -210,23 +155,6 @@ Proof:
 - Synchronous outcomes become `succeeded`, `no_match`, or visible `failed`.
 
 ### Implementation PR 4: Concurrency and retry policy
-
-Files:
-
-- `app/lib/strata/events/errors.rb`
-- `app/models/concerns/strata/step.rb`
-- `app/models/strata/business_process_builder.rb`
-- `app/models/strata/staff_task.rb`
-- `app/models/strata/system_process.rb`
-- `app/models/strata/applicant_task.rb`
-- `app/models/strata/third_party_task.rb`
-- `app/models/strata/business_process_instance.rb`
-- `spec/models/strata/business_process_builder_spec.rb`
-- `spec/models/strata/business_process_instance_spec.rb`
-- `spec/models/strata/staff_task_spec.rb`
-- `spec/models/strata/system_process_spec.rb`
-- `spec/models/strata/applicant_task_spec.rb`
-- `spec/models/strata/third_party_task_spec.rb`
 
 Replace the ordinary step save with the step-and-version conditional update
 from the spec. On conflict, reload and re-evaluate up to three times. Run no
@@ -242,25 +170,6 @@ Proof:
 - Every step helper propagates its retry policy.
 
 ### Implementation PR 5: ActiveJob delivery and recovery
-
-Files:
-
-- `app/jobs/strata/event_delivery_job.rb`
-- `app/jobs/strata/requeue_stranded_deliveries_job.rb`
-- `app/lib/strata/events/dispatcher.rb`
-- `app/lib/strata/events/delivery_runner.rb`
-- `app/helpers/strata/event_manager.rb`
-- `app/models/strata/event_delivery.rb`
-- `lib/tasks/strata_events.rake`
-- `lib/strata/testing/event_helpers.rb`
-- `spec/jobs/strata/event_delivery_job_spec.rb`
-- `spec/jobs/strata/requeue_stranded_deliveries_job_spec.rb`
-- `spec/lib/strata/events/dispatcher_spec.rb`
-- `spec/lib/strata/events/delivery_runner_spec.rb`
-- `spec/lib/tasks/strata_events_spec.rb`
-- `spec/lib/strata/testing/event_helpers_spec.rb`
-- `spec/helpers/strata/event_manager_spec.rb`
-- `spec/integration/strata/durable_events_spec.rb`
 
 After the publisher's outermost commit, dispatch each pending delivery and set
 `enqueued_at` only after the adapter accepts it. The job locks the delivery,
@@ -298,20 +207,6 @@ Proof:
 
 ### Implementation PR 6: Supported backend and rollout documentation
 
-Files:
-
-- `Gemfile`
-- `Gemfile.lock`
-- `spec/dummy/config/environments/test.rb`
-- `spec/dummy/config/environments/development.rb`
-- `spec/dummy/config/queue.yml`
-- `spec/dummy/config/recurring.yml`
-- `spec/dummy/db/queue_schema.rb`
-- `README.md`
-- `docs/case-management-business-process.md`
-- `docs/generators.md`
-- `docs/getting-started.md`
-
 Use Solid Queue in the dummy app only; do not add a queue backend to the gemspec.
 Document the generator, host-provided payload samples, subscriber migration,
 idempotency, `retryable: false`, operator tasks, test helpers, supported queue
@@ -333,7 +228,7 @@ Proof:
 
 ## Test gates
 
-Run focused specs from each slice, then run before every merge:
+Run the focused specs for the work in hand, then run before every merge:
 
 ```sh
 bundle exec rspec
@@ -367,15 +262,11 @@ above:
   `spec/dummy/config/application.rb:40` starts it listening inside
   `config.after_initialize`, so any spec that saves a `PassportApplicationForm`
   creates a `PassportCase` through the event path whether it asserts on it or
-  not. Changing delivery timing therefore reaches past the specs named in each
-  PR above — at least `spec/models/strata/task_spec.rb`,
-  `spec/models/strata/application_form_spec.rb`,
-  `spec/dummy/spec/models/passport_application_form_spec.rb`,
-  `spec/policies/strata/application_form_policy_spec.rb`,
-  `spec/dummy/spec/views/passport_application_forms/show.html.erb_spec.rb`, and
-  `spec/dummy/spec/controllers/sample_application_forms_controller_spec.rb`.
-  `spec/factories/strata/strata_test_case_factory.rb:7` already works around it
-  with `find_or_create_by!`.
+  not. Changing delivery timing therefore reaches well beyond the specs any
+  one PR above is about — model, policy, view, and controller specs across
+  both the engine and the dummy app all run through it today. Budget for that
+  rather than discovering it at the end; the engine's test case factory
+  already works around the same coupling with `find_or_create_by!`.
 
 ## Main risks
 
