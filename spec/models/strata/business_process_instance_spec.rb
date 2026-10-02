@@ -44,8 +44,10 @@ RSpec.describe Strata::BusinessProcessInstance do
         allow(TestBusinessProcess.get_step('third_party_task')).to receive(:execute).and_raise(StandardError, 'boom')
       end
 
-      # The case has already advanced when the step fails; making step mutation and
-      # execution atomic is a separate change in the durable events plan.
+      # TODO: The case has already advanced when the step fails, so this reports
+      # :transitioned. Once step mutation and execution are atomic and step exceptions
+      # propagate (Phase 1 of docs/specs/durable-events/spec.md), the step change should
+      # roll back and this expectation should change.
       it 'still reports :transitioned' do
         expect(business_process_instance.transition_to_next_step({ name: 'event4', payload: { case_id: kase.id } }))
           .to eq(:transitioned)
