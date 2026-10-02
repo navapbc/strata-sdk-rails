@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft for engineering review. Implementation has started with Phase 1; see
+Implementation has started with Phase 1; see
 [Implementation progress](#implementation-progress).
 
 ## Purpose in one sentence
