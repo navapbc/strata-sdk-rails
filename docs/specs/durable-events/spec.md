@@ -2,7 +2,8 @@
 
 ## Status
 
-Draft for engineering review. No implementation has started.
+Implementation has started with Phase 1; see
+[Implementation progress](#implementation-progress).
 
 ## Purpose in one sentence
 
@@ -277,6 +278,12 @@ process handler emits one structured outcome log per resolved case. Each entry
 includes at least the event name, subscriber key, case type, case ID, and
 `:transitioned` or `:no_match` outcome.
 
+> **Implemented** in [#384](https://github.com/navapbc/strata-sdk-rails/pull/384):
+> the `transition_to_next_step` and `handle_event` return values above. Not yet
+> implemented: the per-case structured outcome log. Until step exceptions stop
+> being swallowed, a step that raises after the case is saved still reports
+> `:transitioned`.
+
 ## Configuration
 
 ```ruby
@@ -370,6 +377,16 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
   handler transaction, persist the next attempt, and schedule it durably.
 - Ship with durability defaulting off, then default it on in the following
   release as recorded in resolved decision 3.
+
+### Implementation progress
+
+| Slice | Phase | Status |
+| --- | --- | --- |
+| Handler outcome contract: transitions return `:transitioned` or `:no_match` | 1 | In review — [#384](https://github.com/navapbc/strata-sdk-rails/pull/384) |
+| Per-case structured outcome log | 1 | Not started |
+| Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | Not started |
+| Event and delivery persistence | 2 | Not started |
+| Durable ActiveJob delivery | 3 | Not started |
 
 ## Host upgrade checklist
 
