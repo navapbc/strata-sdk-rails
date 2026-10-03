@@ -8,14 +8,14 @@ Multi-Page Form Flows enable developers to define and build complex forms that s
 - **Automatically defined routes and controller actions**—Routes and controller actions for each of the form's pages are automatically generated.
 - **View components** for rendering unordered task lists and section states.
 - **Customizable**—Routes, controller actions, and views are all customizable if the default behavior does not meet the application's needs.
-- **[FUTURE] Built-in views**—Prebuilt views that show the current page, current task/section, and overall progress of the form.
-- **[FUTURE] Supports looping pattern**—Supports gathering information about multiple people or items in a single or multi-page loop.
+- **Supports looping pattern**—Supports gathering information about multiple people or items in a single or multi-page loop.
+- **Generated views**—Prebuilt views that display form fields based on the form flow definition.
 
 ## Design Principles
 
 ### Limit questions to one per page, where possible
 
-The form builder encourages a one-question-per-page approach.Through usability testing and secondary research, we’ve learned that taking a one-question-per-page approach increases people’s comfort and confidence and reduces their cognitive burden while moving through an application.
+The form builder encourages a one-question-per-page approach. Through usability testing and secondary research, we’ve learned that taking a one-question-per-page approach increases people’s comfort and confidence and reduces their cognitive burden while moving through an application.
 
 This approach is not a strict rule. In some cases, it might be a better user experience to pair some questions on the same page together, e.g., name and birth date.
 
@@ -60,6 +60,13 @@ class LeaveApplicationFormFlow
     question_page :leave_type
     question_page :leave_dates
   end
+
+  task :employment_details do
+    question_page :employers
+    loop :employments do
+      question_page :employer_notification
+    end
+  end
 end
 ```
 
@@ -94,6 +101,19 @@ For conditionally-rendered pages, provide an `if` option:
 question_page :supporting_documents, if: ->(record) { record.leave_type_medical? }
 ```
 
+Loops work off of associations within your primary model. Specify a different association with this option:
+
+```ruby
+loop :employment_details, association: :employments do ...
+```
+
+You can pass in scopes to only collect information on specific records:
+
+```ruby
+loop :employment_details, scope: :is_current, do ...
+loop :employment_details, scope: (employment) -> { employment.is_current }, do ...
+```
+
 ### Generating Routes
 
 Routes can be generated for your application form's controller:
@@ -110,7 +130,7 @@ class LeaveApplicationFormsController
 
     def flow_record
       # In most scenarios, you'll likely have a before_action that sets this, e.g.
-      # @leave_application_form ||= authorize(LeaveApplication.find(params[:id]), :update?)
+      # @leave_application_form ||= authorize(LeaveApplication.find(flow_record_id), :update?)
       @leave_application
     end
   end
@@ -120,12 +140,7 @@ In your `routes.rb` file, use your flow class to define the routes:
 
 ```ruby
 resources "leave_application_forms" do
-    member do
-      LeaveApplicationFormFlow.pages.each do |page|
-        get page.edit_pathname
-        patch page.update_pathname
-      end
-    end
+  mount_flow_routes LeaveApplicationFormFlow
 end
 ```
 
@@ -144,6 +159,12 @@ app/views/leave_application_forms/edit_name.html.erb
 app/views/leave_application_forms/edit_date_of_birth.html.erb
 ...
 ```
+
+The following types of form pages and fields are currently not supported:
+
+- Looping pages
+- Document upload form fields
+- form fields on associated records
 
 The following file is created or updated with default translation strings for each of the fields on your question page:
 

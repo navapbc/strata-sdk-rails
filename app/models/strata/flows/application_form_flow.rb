@@ -15,6 +15,12 @@ module Strata::Flows
   #       question_page :leave_dates
   #       question_page :supporting_documents, if: ->(app) { app.leave_type_medical? }
   #     end
+  #     task :prior_employment do
+  #       loop :prior_employer, association: :prior_employers do
+  #         question_page :business_name
+  #         question_page :role
+  #       end
+  #     end
   #   end
   module ApplicationFormFlow
     extend ActiveSupport::Concern
@@ -38,10 +44,20 @@ module Strata::Flows
         tasks.flat_map(&:pages)
       end
 
+      # Returns the flat sequence of QuestionPages across the flow, with each
+      # Loop expanded in place into its enclosed pages.
+      def all_pages
+        tasks.flat_map do |task|
+          task.pages.flat_map do |item|
+            item.is_a?(Loop) ? item.pages : [ item ]
+          end
+        end
+      end
+
       # Returns all routes that can be generated when used in
       # combination with ApplicationFormController
       def generated_routes
-        tasks.flat_map(&:pages).flat_map do |page|
+        all_pages.flat_map do |page|
           [ page.edit_pathname, page.update_pathname ]
         end
       end
@@ -71,9 +87,25 @@ module Strata::Flows
       # If no fields are provided, we assume that the page
       # has one field which matches the name of the page.
       def question_page(page_name, if: nil, fields: nil)
-        page = QuestionPage.new(page_name, if:, fields:)
-        @current_task.pages.push(page)
+        page = QuestionPage.new(page_name, if:, fields:, loop: @current_loop)
+        if @current_loop.present?
+          @current_loop.pages.push(page)
+        else
+          @current_task.pages.push(page)
+        end
         contexts.push(page_name)
+        validate_unique_action_names!
+      end
+
+      # Defines a loop over a has_many association on the flow record.
+      # When association: is omitted, it defaults to the loop name.
+      # `scope:` optionally narrows the association — accepts a Symbol naming
+      # a scope on the relation, or a Proc that receives and returns a relation.
+      def loop(loop_name, association: nil, scope: nil, &block)
+        @current_loop = Loop.new(loop_name, association: association, scope: scope)
+        @current_task.pages.push(@current_loop)
+        block.call
+        @current_loop = nil
       end
 
       # A start page to return to when exiting out of a
@@ -96,12 +128,23 @@ module Strata::Flows
         @end_pathname = path
       end
 
-      def find_page_and_task_by_action(flow_record, action)
+      def find_page_and_task_by_action(flow_record, action, id_param = nil)
+        action_sym = action.to_sym
+
         tasks.each do |task|
-          task.pages.each_with_index do |page, page_idx|
-            # Search for the current page based on the request action
-            if [ page.edit_pathname.to_sym, page.update_pathname.to_sym ].include?(action.to_sym)
-              return page, TaskEvaluator.new(task, flow_record, page_idx)
+          task.pages.each_with_index do |item, page_idx|
+            if item.is_a?(Loop)
+              item.pages.each_with_index do |loop_page, loop_page_idx|
+                next unless [ loop_page.edit_pathname.to_sym, loop_page.update_pathname.to_sym ].include?(action_sym)
+
+                loop_record = resolve_loop_record(item, flow_record, id_param)
+                return loop_page, TaskEvaluator.new(
+                  task, flow_record, page_idx,
+                  loop_record: loop_record, loop_page_idx: loop_page_idx
+                )
+              end
+            elsif [ item.edit_pathname.to_sym, item.update_pathname.to_sym ].include?(action_sym)
+              return item, TaskEvaluator.new(task, flow_record, page_idx)
             end
           end
         end
@@ -114,6 +157,7 @@ module Strata::Flows
 
         tasks.each do |task|
           task.pages.each do |page|
+            next if page.is_a?(Loop)
             node_name = page.name
             fields = page.fields.flat_map do |field|
               if field.is_a?(Hash)
@@ -133,10 +177,11 @@ module Strata::Flows
           end
 
           diagram += "  subgraph t_#{task.name}[Task: #{task.name}]\n"
-          if task.pages.length < 2
-            diagram += "    #{task.pages.first.name}\n"
+          rendered_pages = task.pages.reject { |p| p.is_a?(Loop) }
+          if rendered_pages.length < 2
+            diagram += "    #{rendered_pages.first.name}\n" if rendered_pages.first
           else
-            task.pages.each_cons(2) do |a, b|
+            rendered_pages.each_cons(2) do |a, b|
               diagram += "    #{a.name} --> #{b.name}\n"
             end
           end
@@ -148,6 +193,22 @@ module Strata::Flows
         end
 
         diagram
+      end
+
+      private
+
+      def resolve_loop_record(loop_node, flow_record, id_param)
+        return nil unless id_param
+
+        loop_node.records_for(flow_record).find(id_param)
+      end
+
+      def validate_unique_action_names!
+        pathnames = all_pages.flat_map { |p| [ p.edit_pathname, p.update_pathname ] }
+        duplicates = pathnames.tally.select { |_, count| count > 1 }.keys
+        return if duplicates.empty?
+
+        raise ArgumentError, "duplicate action name(s) in flow: #{duplicates.join(', ')}"
       end
     end
 

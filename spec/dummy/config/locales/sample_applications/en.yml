@@ -7,6 +7,9 @@ en:
       employment_details:
         title: Employment
         description: Tell us about your employer. You'll need to enter their legal name and their 9 digit federal employer identification number (FEIN or EIN).
+      prior_employment:
+        title: Prior Employment
+        description: Tell us about each of your prior employers. We'll walk you through each one.
       leave_details:
         title: Leave Details
         description: Tell us about the type of leave you're taking (Parental, Medical, Family Caregiving, or Military Exigency). You'll need to enter your leave dates and provide supporting documentation.
@@ -37,6 +40,10 @@ en:
       date_of_birth_title: When were you born?
     edit_employer_name:
       employer_name_title: Who is your employer?
+    edit_prior_employer_business_name:
+      business_name_title: What was the name of this prior employer?
+    edit_prior_employer_role:
+      role_title: What was your role at this prior employer?
     edit_leave_type:
       leave_type_title: Why do you need to take leave?
     review:

@@ -11,14 +11,11 @@ Rails.application.routes.draw do
 
   resources :sample_application_forms, only: [ :index, :new, :show, :create ] do
     member do
-      SampleFlow.pages.each do |page|
-        get page.edit_pathname
-        patch page.update_pathname
-      end
-
       get :review
       patch :submit
     end
+
+    mount_flow_routes SampleFlow
   end
 
   scope path: "/staff" do

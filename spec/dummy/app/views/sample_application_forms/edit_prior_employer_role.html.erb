@@ -1,0 +1,8 @@
+<%= strata_form_with model: @flow_task.loop_record, url: @flow_task.update_path, method: :patch do |f| %>
+  <%= f.text_field :role, {
+    legend: t(".role_title"),
+    large_legend: true
+  } %>
+
+  <%= render partial: "form_buttons", locals: { back_path: @flow_task.prev_path || @flow.start_path, f: f } %>
+<% end %>

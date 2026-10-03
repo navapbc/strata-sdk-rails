@@ -12,11 +12,15 @@ module Strata::Flows
     end
 
     def started?(record)
-      @pages.any? { |page| page.completed?(record) }
+      @pages.any? do |item|
+        item.is_a?(Loop) ? item.started?(record) : item.completed?(record)
+      end
     end
 
     def completed?(record)
-      @pages.all? { |page| page.completed?(record) }
+      @pages.all? do |item|
+        item.completed?(record)
+      end
     end
 
     def dependencies_met?(flow)
@@ -28,9 +32,44 @@ module Strata::Flows
       return nil if @pages.empty?
 
       if !started?(record) || completed?(record)
-        @pages.first.edit_path(record)
+        first_path(record)
       else
-        @pages.find { |page| !page.completed?(record) }.edit_path(record)
+        first_incomplete_path(record)
+      end
+    end
+
+    private
+
+    def first_path(record)
+      @pages.each do |item|
+        path = enter_forward(item, record)
+        return path if path
+      end
+      nil
+    end
+
+    def first_incomplete_path(record)
+      @pages.each do |item|
+        if item.is_a?(Loop)
+          item.records_for(record).each do |child|
+            incomplete = item.pages.find { |p| !p.completed?(child) }
+            return incomplete.edit_path(record, child) if incomplete
+          end
+        elsif !item.completed?(record)
+          return item.edit_path(record)
+        end
+      end
+      nil
+    end
+
+    def enter_forward(item, record)
+      if item.is_a?(Loop)
+        first_child = item.records_for(record).first
+        return nil unless first_child
+        first_page = item.pages.find { |p| p.needed?(first_child) }
+        first_page&.edit_path(record, first_child)
+      else
+        item.needed?(record) ? item.edit_path(record) : nil
       end
     end
   end
