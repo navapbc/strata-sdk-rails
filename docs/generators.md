@@ -95,7 +95,7 @@ bin/rails generate strata:staff
 
 The following attribute types are supported across various generators:
 
-- `name` - Creates columns for first, middle, and last name
+- `name` - Creates columns for first, middle, last name, and suffix
 - `address` - Creates columns for street lines, city, state, and zip code
 - `money` - Creates an integer column (stores cents)
 - `memorable_date` - Creates a date column

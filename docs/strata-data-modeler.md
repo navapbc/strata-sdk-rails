@@ -44,7 +44,7 @@ bin/rails generate strata:migration AddPersonalInfoToUsers name:name date_of_bir
 
 This generates a migration with the appropriate columns:
 
-- `name_first`, `name_middle`, `name_last` (string columns for the name attribute)
+- `name_first`, `name_middle`, `name_last`, `name_suffix` (string columns for the name attribute)
 
 - `date_of_birth` (date column for the memorable_date attribute)  
 
