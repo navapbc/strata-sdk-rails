@@ -7,7 +7,7 @@ require 'tmpdir'
 
 RSpec.describe Strata::Generators::MigrationGenerator, type: :generator do
   let(:destination_root) { Dir.mktmpdir }
-  let(:generator) { described_class.new([ name, *attrs ], options, destination_root: destination_root) }
+  let(:generator) { described_class.new([ name, *attrs ], options.merge(quiet: true), destination_root: destination_root) }
   let(:name) { 'CreateTestRecords' }
   let(:attrs) { [] }
   let(:options) { {} }
@@ -181,6 +181,199 @@ RSpec.describe Strata::Generators::MigrationGenerator, type: :generator do
           "CreateTestRecords",
           "fiscal_period:string"
         )
+      end
+    end
+
+    context "with user_facing_id type" do
+      let(:attrs) { [ "user_facing_id:user_facing_id" ] }
+
+      it "creates a bigserial sequence column with a unique index" do
+        generator.create_migration_file
+        expect(generator).to have_received(:generate).with(
+          "migration",
+          "CreateTestRecords",
+          "user_facing_id_sequence:bigint!:uniq"
+        )
+      end
+    end
+
+    context "with a custom-named user_facing_id" do
+      let(:attrs) { [ "claim_id:user_facing_id" ] }
+
+      it "appends _sequence to the attribute name" do
+        generator.create_migration_file
+        expect(generator).to have_received(:generate).with(
+          "migration",
+          "CreateTestRecords",
+          "claim_id_sequence:bigint!:uniq"
+        )
+      end
+    end
+
+    context "with user_facing_id mixed alongside other attributes" do
+      let(:attrs) { [ "full_name:name", "user_facing_id:user_facing_id", "email:string" ] }
+
+      it "emits the sequence column inline with the others" do
+        generator.create_migration_file
+        expect(generator).to have_received(:generate).with(
+          "migration",
+          "CreateTestRecords",
+          "full_name_first:string",
+          "full_name_middle:string",
+          "full_name_last:string",
+          "full_name_suffix:string",
+          "user_facing_id_sequence:bigint!:uniq",
+          "email:string"
+        )
+      end
+    end
+
+    context "when user_facing_id is combined with :array" do
+      let(:attrs) { [ "user_facing_id:user_facing_id:array" ] }
+
+      it "raises an informative error" do
+        expect { generator.create_migration_file }.to raise_error(
+          ArgumentError, /user_facing_id.*does not support.*array/i
+        )
+      end
+    end
+
+    context "when user_facing_id is combined with :range" do
+      let(:attrs) { [ "user_facing_id:user_facing_id:range" ] }
+
+      it "raises an informative error" do
+        expect { generator.create_migration_file }.to raise_error(
+          ArgumentError, /user_facing_id.*does not support.*range/i
+        )
+      end
+    end
+  end
+
+  describe "rewriting :bigint to :bigserial for user_facing_id sequence columns" do
+    # The migration generator emits `:bigint!` to Rails' migration generator
+    # (Rails rejects `:bigserial` since it's not in PostgreSQL's
+    # native_database_types map) and then patches the generated file to
+    # restore the autoincrementing sequence semantics. These specs stub
+    # `generate` to write a fixture migration in the format Rails would
+    # produce, then assert the rewrite runs.
+    let(:migration_filename) { "20260101000000_#{name.underscore}.rb" }
+    let(:migration_path) { File.join(destination_root, "db/migrate", migration_filename) }
+
+    context "when Rails emits the create_table form (t.bigint :col)" do
+      let(:attrs) { [ "user_facing_id:user_facing_id" ] }
+
+      before do
+        allow(generator).to receive(:generate) do
+          File.write(migration_path, <<~RUBY)
+            class CreateTestRecords < ActiveRecord::Migration[8.0]
+              def change
+                create_table :test_records do |t|
+                  t.bigint :user_facing_id_sequence, null: false
+
+                  t.timestamps
+                end
+                add_index :test_records, :user_facing_id_sequence, unique: true
+              end
+            end
+          RUBY
+        end
+      end
+
+      it "rewrites :bigint to :bigserial for the sequence column" do
+        generator.create_migration_file
+        contents = File.read(migration_path)
+        expect(contents).to include("t.bigserial :user_facing_id_sequence, null: false")
+        expect(contents).not_to include("t.bigint :user_facing_id_sequence")
+      end
+    end
+
+    context "when Rails emits the add_column form (..., :col, :bigint, ...)" do
+      let(:name) { "AddUserFacingIdToTestRecords" }
+      let(:attrs) { [ "user_facing_id:user_facing_id" ] }
+
+      before do
+        allow(generator).to receive(:generate) do
+          File.write(migration_path, <<~RUBY)
+            class AddUserFacingIdToTestRecords < ActiveRecord::Migration[8.0]
+              def change
+                add_column :test_records, :user_facing_id_sequence, :bigint, null: false
+                add_index :test_records, :user_facing_id_sequence, unique: true
+              end
+            end
+          RUBY
+        end
+      end
+
+      it "rewrites :bigint to :bigserial for the sequence column" do
+        generator.create_migration_file
+        contents = File.read(migration_path)
+        expect(contents).to include(":user_facing_id_sequence, :bigserial, null: false")
+        expect(contents).not_to include(":user_facing_id_sequence, :bigint")
+      end
+    end
+
+    context "with a non-user_facing_id bigint column in the same migration" do
+      let(:attrs) { [ "user_facing_id:user_facing_id", "count:bigint" ] }
+
+      before do
+        allow(generator).to receive(:generate) do
+          File.write(migration_path, <<~RUBY)
+            class CreateTestRecords < ActiveRecord::Migration[8.0]
+              def change
+                create_table :test_records do |t|
+                  t.bigint :user_facing_id_sequence, null: false
+                  t.bigint :count
+                end
+                add_index :test_records, :user_facing_id_sequence, unique: true
+              end
+            end
+          RUBY
+        end
+      end
+
+      it "rewrites only the sequence column and leaves other bigint columns alone" do
+        generator.create_migration_file
+        contents = File.read(migration_path)
+        expect(contents).to include("t.bigserial :user_facing_id_sequence, null: false")
+        expect(contents).to include("t.bigint :count")
+      end
+    end
+
+    context "with multiple user_facing_id attributes" do
+      let(:attrs) { [ "user_facing_id:user_facing_id", "claim_id:user_facing_id" ] }
+
+      before do
+        allow(generator).to receive(:generate) do
+          File.write(migration_path, <<~RUBY)
+            class CreateTestRecords < ActiveRecord::Migration[8.0]
+              def change
+                create_table :test_records do |t|
+                  t.bigint :user_facing_id_sequence, null: false
+                  t.bigint :claim_id_sequence, null: false
+                end
+                add_index :test_records, :user_facing_id_sequence, unique: true
+                add_index :test_records, :claim_id_sequence, unique: true
+              end
+            end
+          RUBY
+        end
+      end
+
+      it "rewrites each sequence column independently" do
+        generator.create_migration_file
+        contents = File.read(migration_path)
+        expect(contents).to include("t.bigserial :user_facing_id_sequence, null: false")
+        expect(contents).to include("t.bigserial :claim_id_sequence, null: false")
+        expect(contents).not_to include("t.bigint")
+      end
+    end
+
+    context "when no migration file matches the expected name" do
+      let(:attrs) { [ "user_facing_id:user_facing_id" ] }
+
+      it "does not raise" do
+        # `generate` is stubbed to do nothing, so no file is written
+        expect { generator.create_migration_file }.not_to raise_error
       end
     end
   end

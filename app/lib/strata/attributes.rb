@@ -27,6 +27,7 @@ module Strata
     include Strata::Attributes::RangeAttribute
     include Strata::Attributes::TaxIdAttribute
     include Strata::Attributes::USDateAttribute
+    include Strata::Attributes::UserFacingIdAttribute
     include Strata::Attributes::YearMonthAttribute
     include Strata::Attributes::YearQuarterAttribute
 

@@ -4,7 +4,12 @@ class <%= class_name %> < <%= parent_class_name.classify %>
   include Strata::Attributes
 
 <% strata_attributes.each do |attribute| -%>
+<% if attribute[:type] == :user_facing_id -%>
+  # TODO: replace prefix "TODO" with a short uppercase code (e.g. "T", "CLAIM"). The key was randomly generated — do not change it once IDs have been issued.
+  strata_attribute :<%= attribute[:name] %>, :user_facing_id, prefix: "TODO", key: <%= user_facing_id_key_for(attribute) %>
+<% else -%>
   strata_attribute :<%= attribute[:name] %>, :<%= attribute[:type] %>
+<% end -%>
 <% end -%>
 <% end -%>
 <% if has_rails_attributes? -%>

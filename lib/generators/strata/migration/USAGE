@@ -24,6 +24,7 @@ Supported Attribute Types:
     year_month           - Creates columns: year (:integer), month (:integer)
     year_quarter         - Creates columns: year (:integer), quarter (:integer)
     year_quarter_range   - Creates columns: start_year, start_quarter, end_year, end_quarter (all :integer)
+    user_facing_id       - Creates column: NAME_sequence (:bigserial) with a unique index
     standard Rails types - Any additional standard Rails migration types can be specified as needed.
 
 This will create:
