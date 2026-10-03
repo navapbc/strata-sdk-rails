@@ -1,18 +1,8 @@
-<% if content_for?(:breadcrumbs) %>
-  <%= yield :breadcrumbs %>
-<% else %>
-  <nav class="usa-breadcrumb" aria-label="Breadcrumbs">
-    <ol class="usa-breadcrumb__list">
-      <% breadcrumbs[0...-1].each do |breadcrumb| %>
-        <li class="usa-breadcrumb__list-item">
-          <%= link_to breadcrumb[:text], breadcrumb[:link], class: "usa-breadcrumb__link" %>
-        </li>
-      <% end %>
-      <% if breadcrumbs.last %>
-        <li class="usa-breadcrumb__list-item usa-current" aria-current="page">
-          <span><%= breadcrumbs.last[:text] %></span>
-        </li>
-      <% end %>
-    </ol>
-  </nav>
+<%# Translate the legacy `link:` key to `href:` so downstream callers passing the
+    pre-component hash shape still render clickable links. %>
+<%
+  breadcrumbs = breadcrumbs.map { |bc| bc.transform_keys { |k| k == :link ? :href : k } }
+%>
+<%= render Strata::US::BreadcrumbsComponent.new do |bc| %>
+  <% bc.with_items(breadcrumbs) %>
 <% end %>

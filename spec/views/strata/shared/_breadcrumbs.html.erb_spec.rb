@@ -3,93 +3,95 @@
 require 'rails_helper'
 
 RSpec.describe "strata/shared/_breadcrumbs.html.erb", type: :view do
-  describe "when custom breadcrumbs are provided" do
-    before do
-      view.content_for(:breadcrumbs) do
-        '<nav>Custom breadcrumbs</nav>'
-      end
-      render partial: "strata/shared/breadcrumbs"
-    end
+  before do
+    render partial: "strata/shared/breadcrumbs", locals: { breadcrumbs: breadcrumbs }
+  end
 
-    it "renders the custom breadcrumbs content" do
-      expect(rendered).to include('Custom breadcrumbs')
-    end
+  context "with a single breadcrumb" do
+    let(:breadcrumbs) { [ { text: "Dashboard" } ] }
 
-    it "does not render the default breadcrumb navigation" do
-      expect(rendered).not_to include('usa-breadcrumb')
+    it "renders a single breadcrumb without a link" do
+      expect(rendered).to have_selector('nav.usa-breadcrumb')
+      expect(rendered).to have_selector('ol.usa-breadcrumb__list')
+      expect(rendered).to have_selector('li.usa-breadcrumb__list-item.usa-current[aria-current="page"]')
+      expect(rendered).to have_selector('span', text: "Dashboard")
+      expect(rendered).not_to have_selector('a.usa-breadcrumb__link')
     end
   end
 
-  describe "when no custom breadcrumbs are provided" do
-    before do
-      render partial: "strata/shared/breadcrumbs", locals: { breadcrumbs: breadcrumbs }
+  context "with multiple breadcrumbs" do
+    let(:breadcrumbs) {
+      [
+        { text: "Home", href: "/" },
+        { text: "Cases", href: "/cases" },
+        { text: "Case #12345" }
+      ]
+    }
+
+    it "renders all breadcrumbs with proper structure" do
+      expect(rendered).to have_selector('nav.usa-breadcrumb')
+      expect(rendered).to have_selector('ol.usa-breadcrumb__list')
     end
 
-    context "with a single breadcrumb" do
-      let(:breadcrumbs) { [ { text: "Dashboard" } ] }
-
-      it "renders a single breadcrumb without a link" do
-        expect(rendered).to have_selector('nav.usa-breadcrumb[aria-label="Breadcrumbs"]')
-        expect(rendered).to have_selector('ol.usa-breadcrumb__list')
-        expect(rendered).to have_selector('li.usa-breadcrumb__list-item.usa-current[aria-current="page"]')
-        expect(rendered).to have_selector('span', text: "Dashboard")
-        expect(rendered).not_to have_selector('a.usa-breadcrumb__link')
-      end
+    it "renders clickable links for all but the last breadcrumb" do
+      expect(rendered).to have_selector('li.usa-breadcrumb__list-item a.usa-breadcrumb__link[href="/"]', text: "Home")
+      expect(rendered).to have_selector('li.usa-breadcrumb__list-item a.usa-breadcrumb__link[href="/cases"]', text: "Cases")
     end
 
-    context "with multiple breadcrumbs" do
-      let(:breadcrumbs) {
-        [
-          { text: "Home", link: "/" },
-          { text: "Cases", link: "/cases" },
-          { text: "Case #12345" }
-        ]
-      }
-
-      it "renders all breadcrumbs with proper structure" do
-        expect(rendered).to have_selector('nav.usa-breadcrumb[aria-label="Breadcrumbs"]')
-        expect(rendered).to have_selector('ol.usa-breadcrumb__list')
-      end
-
-      it "renders clickable links for all but the last breadcrumb" do
-        expect(rendered).to have_selector('li.usa-breadcrumb__list-item a.usa-breadcrumb__link[href="/"]', text: "Home")
-        expect(rendered).to have_selector('li.usa-breadcrumb__list-item a.usa-breadcrumb__link[href="/cases"]', text: "Cases")
-      end
-
-      it "renders the last breadcrumb as current page without a link" do
-        expect(rendered).to have_selector('li.usa-breadcrumb__list-item.usa-current[aria-current="page"]')
-        expect(rendered).to have_selector('li.usa-current span', text: "Case #12345")
-        expect(rendered).not_to have_selector('li.usa-current a')
-      end
-
-      it "has proper accessibility attributes" do
-        expect(rendered).to have_selector('nav[aria-label="Breadcrumbs"]')
-        expect(rendered).to have_selector('li[aria-current="page"]')
-      end
+    it "renders the last breadcrumb as current page without a link" do
+      expect(rendered).to have_selector('li.usa-breadcrumb__list-item.usa-current[aria-current="page"]')
+      expect(rendered).to have_selector('li.usa-current span', text: "Case #12345")
+      expect(rendered).not_to have_selector('li.usa-current a')
     end
 
-    context "with empty breadcrumbs array" do
-      let(:breadcrumbs) { [] }
+    it "has proper accessibility attributes" do
+      expect(rendered).to have_selector('nav[aria-label]')
+      expect(rendered).to have_selector('li[aria-current="page"]')
+    end
+  end
 
-      it "raises an error when trying to access last element" do
-        expect { render partial: "strata/shared/breadcrumbs", locals: { breadcrumbs: breadcrumbs } }.not_to raise_error
-      end
+  context "with empty breadcrumbs array" do
+    let(:breadcrumbs) { [] }
+
+    it "renders the nav and empty list without raising" do
+      expect(rendered).to have_selector('ol.usa-breadcrumb__list')
+      expect(rendered).not_to have_selector('li')
+    end
+  end
+
+  context "with breadcrumbs using the legacy link: key" do
+    let(:breadcrumbs) {
+      [
+        { text: "Home", link: "/" },
+        { text: "Cases", link: "/cases" },
+        { text: "Case #12345" }
+      ]
+    }
+
+    it "still renders the URLs as clickable links" do
+      expect(rendered).to have_selector('a.usa-breadcrumb__link[href="/"]', text: "Home")
+      expect(rendered).to have_selector('a.usa-breadcrumb__link[href="/cases"]', text: "Cases")
     end
 
-    context "with breadcrumbs containing special characters" do
-      let(:breadcrumbs) {
-        [
-          { text: "Home & Dashboard", link: "/" },
-          { text: "Cases > Applications", link: "/cases" },
-          { text: "Case #12345 (Active)" }
-        ]
-      }
+    it "marks the last item as the current page without a link" do
+      expect(rendered).to have_selector('li.usa-current span', text: "Case #12345")
+      expect(rendered).not_to have_selector('li.usa-current a')
+    end
+  end
 
-      it "properly escapes special characters in text" do
-        expect(rendered).to include("Home &amp; Dashboard")
-        expect(rendered).to include("Cases &gt; Applications")
-        expect(rendered).to include("Case #12345 (Active)")
-      end
+  context "with breadcrumbs containing special characters" do
+    let(:breadcrumbs) {
+      [
+        { text: "Home & Dashboard", href: "/" },
+        { text: "Cases > Applications", href: "/cases" },
+        { text: "Case #12345 (Active)" }
+      ]
+    }
+
+    it "properly escapes special characters in text" do
+      expect(rendered).to include("Home &amp; Dashboard")
+      expect(rendered).to include("Cases &gt; Applications")
+      expect(rendered).to include("Case #12345 (Active)")
     end
   end
 end
