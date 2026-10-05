@@ -68,6 +68,18 @@ RSpec.describe Strata::EventManager do
       )
     end
 
+    it 'reports an anonymous subscriber by its class name' do
+      subscribe('SomethingElseHappened', ->(_event) { raise StandardError, 'lambda failed' })
+
+      described_class.publish('SomethingElseHappened', {})
+
+      expect(Rails.error).to have_received(:report).with(
+        an_instance_of(StandardError),
+        handled: true,
+        context: { event: 'SomethingElseHappened', subscriber: 'Proc' }
+      )
+    end
+
     it 'logs the error with the event and subscriber' do
       allow(Rails.logger).to receive(:error)
 

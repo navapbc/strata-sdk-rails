@@ -81,7 +81,7 @@ module Strata
       def subscriber_name(callback)
         return "#{callback.receiver.name}.#{callback.name}" if callback.is_a?(Method) && callback.receiver.is_a?(Module)
 
-        callback.inspect
+        callback.class.name
       end
     end
 
