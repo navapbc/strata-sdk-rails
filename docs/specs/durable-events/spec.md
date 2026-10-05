@@ -287,8 +287,9 @@ includes at least the event name, subscriber key, case type, case ID, and
 > strata.business_process.outcome event=<name> subscriber=<Process>.handle_event case_type=<Case> case_id=<id> outcome=<transitioned|no_match>
 > ```
 >
-> Until step exceptions stop being swallowed, a step that raises after the case
-> is saved still reports and logs `:transitioned`.
+> A step that raises now rolls back its case step and propagates instead of
+> reporting `:transitioned`. Outcome lines are written as each case is handled,
+> so a line can describe a case whose change a later failure rolled back.
 
 ## Configuration
 
@@ -347,6 +348,15 @@ Exception propagation must not land by itself while handlers still run inside
 the publisher's transaction. Until durable jobs exist, a publish-boundary
 rescue keeps the form or task saved while rolling back the failed case step.
 
+> **Implemented** (fixes 1 and 4, plus the rescue): `start_from_event` and
+> `transition_to_next_step` save and execute the step in one transaction; step
+> exceptions propagate; and `EventManager.subscribe` runs each subscriber in a
+> savepoint (`transaction(requires_new: true)`), rescuing `StandardError`,
+> logging it, and reporting it via `Rails.error.report(handled: true)`. A
+> failure rolls back everything that subscriber changed for the event,
+> including every case it moved. The `end` step uses `close!`, so a failed close
+> also rolls back.
+
 ## Delivery plan
 
 | Phase | Guarantees introduced |
@@ -390,7 +400,7 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 | --- | --- | --- |
 | Handler outcome contract: transitions return `:transitioned` or `:no_match` | 1 | Done |
 | Per-case structured outcome log | 1 | In review |
-| Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | Not started |
+| Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | In review |
 | Event and delivery persistence | 2 | Not started |
 | Durable ActiveJob delivery | 3 | Not started |
 

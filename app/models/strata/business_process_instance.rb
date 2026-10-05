@@ -51,9 +51,11 @@ module Strata
 
     def start_from_event(event)
       Rails.logger.debug "Starting business process from event: #{event[:name]} with payload: #{event[:payload]}"
-      self.current_step = business_process.start_step_name
-      self.case.save!
-      execute_current_step
+      self.case.transaction do
+        self.current_step = business_process.start_step_name
+        self.case.save!
+        execute_current_step
+      end
     end
 
     # Moves the case to the step the event leads to from its current step, then executes that step.
@@ -66,25 +68,22 @@ module Strata
       return :no_match unless next_step
 
       Rails.logger.debug "Transitioning to step #{next_step} and executing the step"
-      self.current_step = next_step
-      self.case.save!
-      execute_current_step
+      self.case.transaction do
+        self.current_step = next_step
+        self.case.save!
+        execute_current_step
+      end
       :transitioned
     end
 
     private
 
     def execute_current_step
-      begin
-        Rails.logger.debug "Executing current step: #{current_step} for case ID: #{self.case.id}"
-        if current_step == "end"
-          self.case.close
-        else
-          business_process.steps[current_step].execute(self.case)
-        end
-      rescue Exception => e
-        Rails.logger.error "Error executing step #{current_step} for case ID: #{self.case.id} - #{e.message}"
-        Rails.logger.error e.backtrace.join("\n")
+      Rails.logger.debug "Executing current step: #{current_step} for case ID: #{self.case.id}"
+      if current_step == "end"
+        self.case.close!
+      else
+        business_process.steps[current_step].execute(self.case)
       end
     end
 

@@ -28,10 +28,7 @@ module Strata
       # @return [Object] The subscription object, which can be used to unsubscribe
       def subscribe(event_key, callback)
         subscription = ActiveSupport::Notifications.subscribe(event_key) do |name, _started, _finished, _unique_id, payload|
-          callback.call({
-            name: name,
-            payload: payload
-          })
+          call_subscriber(callback, { name: name, payload: payload })
         end
 
         @@subscriptions << subscription
@@ -64,6 +61,27 @@ module Strata
       def publish(event_key, payload = {})
         Rails.logger.debug "Event Manager: Publishing event '#{event_key}' with payload: #{payload.inspect}"
         ActiveSupport::Notifications.instrument(event_key, payload)
+      end
+
+      private
+
+      # Runs the subscriber in a savepoint so its failure rolls back only its own changes,
+      # not the publisher's write or other subscribers'. This is a temporary publish-boundary
+      # rescue until durable delivery jobs handle failures (see docs/specs/durable-events/spec.md).
+      def call_subscriber(callback, event)
+        ActiveRecord::Base.transaction(requires_new: true) do
+          callback.call(event)
+        end
+      rescue StandardError => e
+        subscriber = subscriber_name(callback)
+        Rails.logger.error "Event Manager: Subscriber #{subscriber} failed handling event '#{event[:name]}' - #{e.class}: #{e.message}"
+        Rails.error.report(e, handled: true, context: { event: event[:name], subscriber: subscriber })
+      end
+
+      def subscriber_name(callback)
+        return "#{callback.receiver.name}.#{callback.name}" if callback.is_a?(Method) && callback.receiver.is_a?(Module)
+
+        callback.inspect
       end
     end
 

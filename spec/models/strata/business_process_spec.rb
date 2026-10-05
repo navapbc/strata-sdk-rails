@@ -181,6 +181,64 @@ RSpec.describe Strata::BusinessProcess do
     end
   end
 
+  describe 'when a step fails while handling a published event' do
+    before do
+      allow(Rails.error).to receive(:report)
+    end
+
+    context 'when the start step fails as the application form is created' do
+      before do
+        allow(business_process.get_step('staff_task')).to receive(:execute).and_raise(StandardError, 'boom')
+      end
+
+      it 'keeps the application form and creates no case' do
+        expect { application_form.save! }.not_to raise_error
+
+        expect(TestApplicationForm.exists?(application_form.id)).to be(true)
+        expect(TestCase.where(application_form_id: application_form.id)).not_to exist
+      end
+    end
+
+    context 'when the event resolves to several cases and a later case fails' do
+      let(:first_case) { kase }
+      let(:second_case) do
+        TestCase.create!(application_form_id: application_form.id, business_process_current_step: 'staff_task_2')
+      end
+
+      before do
+        application_form.save!
+        first_case.update!(business_process_current_step: 'staff_task_2')
+        second_case
+
+        calls = 0
+        allow(business_process.get_step('applicant_task')).to receive(:execute) do
+          calls += 1
+          raise StandardError, 'boom' if calls == 2
+        end
+      end
+
+      it 'rolls back every case the handler moved' do
+        expect { Strata::EventManager.publish('event3', { application_form_id: application_form.id }) }.not_to raise_error
+
+        expect(first_case.reload.business_process_instance.current_step).to eq('staff_task_2')
+        expect(second_case.reload.business_process_instance.current_step).to eq('staff_task_2')
+      end
+    end
+
+    context 'when a system process publishes an event whose handler fails' do
+      before do
+        application_form.save!
+        allow(business_process.get_step('staff_task_2')).to receive(:execute).and_raise(StandardError, 'boom')
+      end
+
+      it 'keeps the transition into the system process and rolls back only the failed one' do
+        expect { Strata::EventManager.publish('event1', { case_id: kase.id }) }.not_to raise_error
+
+        expect(kase.reload.business_process_instance.current_step).to eq('system_process')
+      end
+    end
+  end
+
   describe '#stop_listening_for_events' do
     before do
       application_form.save!
