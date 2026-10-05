@@ -279,10 +279,16 @@ includes at least the event name, subscriber key, case type, case ID, and
 `:transitioned` or `:no_match` outcome.
 
 > **Implemented** in [#384](https://github.com/navapbc/strata-sdk-rails/pull/384):
-> the `transition_to_next_step` and `handle_event` return values above. Not yet
-> implemented: the per-case structured outcome log. Until step exceptions stop
-> being swallowed, a step that raises after the case is saved still reports
-> `:transitioned`.
+> the `transition_to_next_step` and `handle_event` return values above. A later
+> slice adds the per-case structured outcome log: one `Rails.logger.info` line
+> per started or resolved case:
+>
+> ```text
+> strata.business_process.outcome event=<name> subscriber=<Process>.handle_event case_type=<Case> case_id=<id> outcome=<transitioned|no_match>
+> ```
+>
+> Until step exceptions stop being swallowed, a step that raises after the case
+> is saved still reports and logs `:transitioned`.
 
 ## Configuration
 
@@ -382,8 +388,8 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 
 | Slice | Phase | Status |
 | --- | --- | --- |
-| Handler outcome contract: transitions return `:transitioned` or `:no_match` | 1 | In review — [#384](https://github.com/navapbc/strata-sdk-rails/pull/384) |
-| Per-case structured outcome log | 1 | Not started |
+| Handler outcome contract: transitions return `:transitioned` or `:no_match` | 1 | Done — [#384](https://github.com/navapbc/strata-sdk-rails/pull/384) |
+| Per-case structured outcome log | 1 | In review |
 | Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | Not started |
 | Event and delivery persistence | 2 | Not started |
 | Durable ActiveJob delivery | 3 | Not started |

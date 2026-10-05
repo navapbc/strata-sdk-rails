@@ -154,13 +154,22 @@ module Strata
         if start_event?(event[:name])
           kase = create_case_from_event(event)
           kase.business_process_instance.start_from_event(event)
+          log_outcome(event, kase, :transitioned)
           :transitioned
         else
           outcomes = case_class.for_event(event).map do |kase|
-            kase.business_process_instance.transition_to_next_step(event)
+            outcome = kase.business_process_instance.transition_to_next_step(event)
+            log_outcome(event, kase, outcome)
+            outcome
           end
           outcomes.include?(:transitioned) ? :transitioned : :no_match
         end
+      end
+
+      # Emits one structured line per case so partial multi-case outcomes stay observable.
+      def log_outcome(event, kase, outcome)
+        Rails.logger.info "strata.business_process.outcome event=#{event[:name]} subscriber=#{name}.handle_event " \
+          "case_type=#{kase.class.name} case_id=#{kase.id} outcome=#{outcome}"
       end
 
       def from_event(event)
