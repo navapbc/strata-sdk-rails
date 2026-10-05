@@ -56,14 +56,20 @@ module Strata
       execute_current_step
     end
 
+    # Moves the case to the step the event leads to from its current step, then executes that step.
+    #
+    # @param [Hash] event The event hash with :name and :payload
+    # @return [Symbol] :transitioned if the case moved, :no_match if the event has no
+    #   transition from the current step
     def transition_to_next_step(event)
       next_step = get_next_step(event[:name])
-      return unless next_step
+      return :no_match unless next_step
 
       Rails.logger.debug "Transitioning to step #{next_step} and executing the step"
       self.current_step = next_step
       self.case.save!
       execute_current_step
+      :transitioned
     end
 
     private

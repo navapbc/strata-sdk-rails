@@ -146,17 +146,20 @@ module Strata
         transitions.values.flat_map(&:keys).uniq | start_events.keys
       end
 
+      # @return [Symbol] :transitioned if a case was started or at least one resolved case
+      #   moved, otherwise :no_match
       def handle_event(event)
         Rails.logger.debug "Handling event: #{event[:name]} with payload: #{event[:payload]}"
 
         if start_event?(event[:name])
           kase = create_case_from_event(event)
           kase.business_process_instance.start_from_event(event)
+          :transitioned
         else
-          cases = case_class.for_event(event)
-          cases.each do |kase|
+          outcomes = case_class.for_event(event).map do |kase|
             kase.business_process_instance.transition_to_next_step(event)
           end
+          outcomes.include?(:transitioned) ? :transitioned : :no_match
         end
       end
 

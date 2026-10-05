@@ -63,6 +63,56 @@ RSpec.describe Strata::BusinessProcess do
     end
   end
 
+  describe 'handler outcome' do
+    before do
+      application_form.save!
+    end
+
+    context 'when the event starts a business process' do
+      it 'creates and starts a case and reports :transitioned' do
+        event = { name: 'TestApplicationFormCreated', payload: { application_form_id: application_form.id } }
+
+        expect { expect(business_process.handle_event(event)).to eq(:transitioned) }
+          .to change { TestCase.where(application_form_id: application_form.id).count }.by(1)
+      end
+    end
+
+    context 'when the event moves the resolved case' do
+      it 'reports :transitioned' do
+        kase.update!(business_process_current_step: 'staff_task_2')
+        expect(business_process.handle_event({ name: 'event3', payload: { case_id: kase.id } })).to eq(:transitioned)
+        expect(kase.reload.business_process_instance.current_step).to eq('applicant_task')
+      end
+    end
+
+    context 'when no resolved case has a transition for the event' do
+      it 'reports :no_match and leaves the case on its current step' do
+        expect(business_process.handle_event({ name: 'event4', payload: { case_id: kase.id } })).to eq(:no_match)
+        expect(kase.reload.business_process_instance.current_step).to eq('staff_task')
+      end
+    end
+
+    context 'when the event resolves to no cases' do
+      it 'reports :no_match' do
+        expect(business_process.handle_event({ name: 'event1', payload: { case_id: SecureRandom.uuid } })).to eq(:no_match)
+      end
+    end
+
+    context 'when the event resolves to several cases and only some move' do
+      let!(:other_case) do
+        TestCase.create!(application_form_id: application_form.id, business_process_current_step: 'staff_task_2')
+      end
+
+      it 'reports :transitioned and moves only the matching case' do
+        event = { name: 'event3', payload: { application_form_id: application_form.id } }
+
+        expect(business_process.handle_event(event)).to eq(:transitioned)
+        expect(other_case.reload.business_process_instance.current_step).to eq('applicant_task')
+        expect(kase.reload.business_process_instance.current_step).to eq('staff_task')
+      end
+    end
+  end
+
   describe '#stop_listening_for_events' do
     before do
       application_form.save!
