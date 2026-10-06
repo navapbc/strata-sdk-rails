@@ -161,6 +161,12 @@ module Strata
         log_outcome(event, kase, :transitioned)
       end
 
+      # TODO: Deprecate in favor of start_case.
+      def from_event(event)
+        kase = create_case_from_event(event)
+        kase.business_process_instance
+      end
+
       def transition_cases(event)
         case_class.for_event(event).map do |kase|
           log_outcome(event, kase, kase.business_process_instance.transition_to_next_step(event))
