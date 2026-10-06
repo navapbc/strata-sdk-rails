@@ -90,4 +90,59 @@ RSpec.describe Strata::EventManager do
       )
     end
   end
+
+  describe '.raising_subscriber_errors' do
+    let(:failing_handler) { EventManagerSpecHandlers.method(:create_case_then_fail) }
+
+    before do
+      allow(Rails.error).to receive(:report)
+      subscribe('SomethingHappened', failing_handler)
+    end
+
+    it 'raises the subscriber error to the caller' do
+      expect {
+        described_class.raising_subscriber_errors { described_class.publish('SomethingHappened', { case_id: 'abc' }) }
+      }.to raise_error(StandardError, 'handler failed')
+    end
+
+    it "still rolls back the subscriber's database changes" do
+      expect {
+        described_class.raising_subscriber_errors { described_class.publish('SomethingHappened', { case_id: 'abc' }) }
+      }.to raise_error(StandardError, 'handler failed')
+
+      expect(TestCase.where(business_process_current_step: 'from_failing_handler')).not_to exist
+    end
+
+    it 'does not report the error as handled' do
+      begin
+        described_class.raising_subscriber_errors { described_class.publish('SomethingHappened', { case_id: 'abc' }) }
+      rescue StandardError
+        nil
+      end
+
+      expect(Rails.error).not_to have_received(:report)
+    end
+
+    it 'raises errors from subscribers of events published by other subscribers' do
+      subscribe('OuterHappened', ->(_event) { described_class.publish('SomethingHappened', { case_id: 'abc' }) })
+
+      expect {
+        described_class.raising_subscriber_errors { described_class.publish('OuterHappened', {}) }
+      }.to raise_error(StandardError, 'handler failed')
+    end
+
+    it 'goes back to rescuing subscriber errors after the block, even if it raised' do
+      begin
+        described_class.raising_subscriber_errors { described_class.publish('SomethingHappened', { case_id: 'abc' }) }
+      rescue StandardError
+        nil
+      end
+
+      expect { described_class.publish('SomethingHappened', { case_id: 'abc' }) }.not_to raise_error
+    end
+
+    it 'returns the value of the block' do
+      expect(described_class.raising_subscriber_errors { :done }).to eq(:done)
+    end
+  end
 end

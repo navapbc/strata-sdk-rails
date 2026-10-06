@@ -10,7 +10,7 @@ namespace :strata do
     task :publish_event, [ :event_name ] => [ :environment ] do |t, args|
       event_name = fetch_required_args!(args, :event_name).first
 
-      Strata::EventManager.publish(event_name)
+      Strata::EventManager.raising_subscriber_errors { Strata::EventManager.publish(event_name) }
 
       Rails.logger.info "Event '#{event_name}' emitted successfully"
     end
@@ -21,7 +21,7 @@ namespace :strata do
       constantized_case_class = case_class.constantize
 
       kase = constantized_case_class.find(case_id)
-      Strata::EventManager.publish(event_name, { kase: kase })
+      Strata::EventManager.raising_subscriber_errors { Strata::EventManager.publish(event_name, { kase: kase }) }
 
       Rails.logger.info "Event '#{event_name}' emitted for '#{case_class}' with ID '#{case_id}'"
     end

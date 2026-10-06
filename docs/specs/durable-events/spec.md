@@ -357,6 +357,12 @@ rescue keeps the form or task saved while rolling back the failed case step.
 > including every case it moved. The `end` step uses `close!`, so a failed close
 > also rolls back. A start event creates the case and runs its first step in
 > one transaction, so a failed first step leaves no case behind.
+>
+> The rescue applies at every publish, including events published by a system
+> process step: a failed nested handler rolls back only its own changes, and
+> the step that published it still commits. Operator rake tasks publish inside
+> `EventManager.raising_subscriber_errors`, which re-raises subscriber errors
+> after rolling back so the task fails instead of reporting success.
 
 ## Delivery plan
 
