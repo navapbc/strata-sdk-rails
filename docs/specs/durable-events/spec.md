@@ -355,7 +355,8 @@ rescue keeps the form or task saved while rolling back the failed case step.
 > logging it, and reporting it via `Rails.error.report(handled: true)`. A
 > failure rolls back everything that subscriber changed for the event,
 > including every case it moved. The `end` step uses `close!`, so a failed close
-> also rolls back.
+> also rolls back. A start event creates the case and runs its first step in
+> one transaction, so a failed first step leaves no case behind.
 
 ## Delivery plan
 
@@ -399,7 +400,7 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 | Slice | Phase | Status |
 | --- | --- | --- |
 | Handler outcome contract: transitions return `:transitioned` or `:no_match` | 1 | Done |
-| Per-case structured outcome log | 1 | In review |
+| Per-case structured outcome log | 1 | Done |
 | Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | In review |
 | Event and delivery persistence | 2 | Not started |
 | Durable ActiveJob delivery | 3 | Not started |

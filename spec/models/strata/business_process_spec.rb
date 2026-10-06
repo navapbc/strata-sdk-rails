@@ -199,6 +199,21 @@ RSpec.describe Strata::BusinessProcess do
       end
     end
 
+    context 'when the start step fails while handling the start event directly' do
+      before do
+        application_form.save!
+        allow(business_process.get_step('staff_task')).to receive(:execute).and_raise(StandardError, 'boom')
+      end
+
+      it 'raises and leaves no new case behind' do
+        event = { name: 'TestApplicationFormCreated', payload: { application_form_id: application_form.id } }
+
+        expect { business_process.handle_event(event) }.to raise_error(StandardError, 'boom')
+
+        expect(TestCase.where(application_form_id: application_form.id).count).to eq(1)
+      end
+    end
+
     context 'when the event resolves to several cases and a later case fails' do
       let(:first_case) { kase }
       let(:second_case) do
