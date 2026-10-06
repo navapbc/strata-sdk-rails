@@ -151,21 +151,34 @@ module Strata
       def handle_event(event)
         Rails.logger.debug "Handling event: #{event[:name]} with payload: #{event[:payload]}"
 
-        if start_event?(event[:name])
-          kase = create_case_from_event(event)
-          kase.business_process_instance.start_from_event(event)
-          :transitioned
-        else
-          outcomes = case_class.for_event(event).map do |kase|
-            kase.business_process_instance.transition_to_next_step(event)
-          end
-          outcomes.include?(:transitioned) ? :transitioned : :no_match
-        end
+        outcomes = start_event?(event[:name]) ? [ start_case(event) ] : transition_cases(event)
+        outcomes.include?(:transitioned) ? :transitioned : :no_match
       end
 
+      def start_case(event)
+        kase = create_case_from_event(event)
+        kase.business_process_instance.start_from_event(event)
+        log_outcome(event, kase, :transitioned)
+      end
+
+      # TODO: Deprecate in favor of start_case.
       def from_event(event)
         kase = create_case_from_event(event)
         kase.business_process_instance
+      end
+
+      def transition_cases(event)
+        case_class.for_event(event).map do |kase|
+          log_outcome(event, kase, kase.business_process_instance.transition_to_next_step(event))
+        end
+      end
+
+      # Emits one structured line per case so partial multi-case outcomes stay observable.
+      # @return [Symbol] the logged outcome
+      def log_outcome(event, kase, outcome)
+        Rails.logger.info "strata.business_process.outcome event=#{event[:name]} subscriber=#{name}.handle_event " \
+          "case_type=#{kase.class.name} case_id=#{kase.id} outcome=#{outcome}"
+        outcome
       end
 
       def start_event?(event_name)
