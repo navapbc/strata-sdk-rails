@@ -11,7 +11,6 @@ RSpec.describe 'strata:events', type: :task do
     Rake::Task.define_task(:environment)
     stub_const('Strata::EventManager', event_manager)
     allow(Strata::EventManager).to receive(:publish)
-    allow(Strata::EventManager).to receive(:raising_subscriber_errors).and_yield
   end
 
   describe 'publish_event' do
@@ -40,26 +39,7 @@ RSpec.describe 'strata:events', type: :task do
         task.invoke(event_name)
 
         expect(Strata::EventManager).to have_received(:publish).with(event_name)
-        expect(Rails.logger).to have_received(:info).with(/Event '#{event_name}' emitted successfully/)
-      end
-
-      it 'publishes with subscriber errors raised' do
-        task.invoke('SomethingHappened')
-
-        expect(Strata::EventManager).to have_received(:raising_subscriber_errors)
-      end
-    end
-
-    describe 'when a subscriber fails' do
-      before do
-        allow(Rails.logger).to receive(:info)
-        allow(Strata::EventManager).to receive(:publish).and_raise(StandardError, 'handler failed')
-      end
-
-      it 'raises and does not report success' do
-        expect { task.invoke('SomethingHappened') }.to raise_error(StandardError, 'handler failed')
-
-        expect(Rails.logger).not_to have_received(:info).with(/emitted successfully/)
+        expect(Rails.logger).to have_received(:info).with("Event '#{event_name}' published. Subscriber failures are logged and reported via Rails.error.")
       end
     end
   end
@@ -112,27 +92,10 @@ RSpec.describe 'strata:events', type: :task do
         task.invoke(event_name, "TestCase", case_id)
 
         expect(Strata::EventManager).to have_received(:publish).with(event_name, hash_including(kase: test_case))
-        expect(Rails.logger).to have_received(:info).with(/Event '#{event_name}' emitted for 'TestCase' with ID '#{case_id}'/)
-      end
-
-      it 'publishes with subscriber errors raised' do
-        task.invoke('SomethingHappened', 'TestCase', 1)
-
-        expect(Strata::EventManager).to have_received(:raising_subscriber_errors)
-      end
-    end
-
-    describe 'when a subscriber fails' do
-      before do
-        allow(Rails.logger).to receive(:info)
-        allow(TestCase).to receive(:find).and_return(instance_double(TestCase))
-        allow(Strata::EventManager).to receive(:publish).and_raise(StandardError, 'handler failed')
-      end
-
-      it 'raises and does not report success' do
-        expect { task.invoke('SomethingHappened', 'TestCase', 1) }.to raise_error(StandardError, 'handler failed')
-
-        expect(Rails.logger).not_to have_received(:info).with(/emitted for/)
+        expect(Rails.logger).to have_received(:info).with(
+          "Event '#{event_name}' published for 'TestCase' with ID '#{case_id}'. " \
+          "Subscriber failures are logged and reported via Rails.error."
+        )
       end
     end
   end

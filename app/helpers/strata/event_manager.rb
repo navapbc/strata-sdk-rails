@@ -63,20 +63,6 @@ module Strata
         ActiveSupport::Notifications.instrument(event_key, payload)
       end
 
-      # Raises subscriber errors to the caller instead of rescuing them, for publishes made
-      # inside the block, including events published by subscribers. Each failed subscriber's
-      # changes are still rolled back. Used by operator tasks that must fail loudly.
-      #
-      # @yield the block whose publishes raise subscriber errors
-      # @return [Object] the value of the block
-      def raising_subscriber_errors
-        previous = Thread.current[:strata_raise_subscriber_errors]
-        Thread.current[:strata_raise_subscriber_errors] = true
-        yield
-      ensure
-        Thread.current[:strata_raise_subscriber_errors] = previous
-      end
-
       private
 
       # Runs the subscriber in a savepoint so its failure rolls back only its own changes,
@@ -87,8 +73,6 @@ module Strata
           callback.call(event)
         end
       rescue StandardError => e
-        raise if Thread.current[:strata_raise_subscriber_errors]
-
         subscriber = subscriber_name(callback)
         Rails.logger.error "Event Manager: Subscriber #{subscriber} failed handling event '#{event[:name]}' - #{e.class}: #{e.message}"
         Rails.error.report(e, handled: true, context: { event: event[:name], subscriber: subscriber })

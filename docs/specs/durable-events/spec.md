@@ -360,9 +360,9 @@ rescue keeps the form or task saved while rolling back the failed case step.
 >
 > The rescue applies at every publish, including events published by a system
 > process step: a failed nested handler rolls back only its own changes, and
-> the step that published it still commits. Operator rake tasks publish inside
-> `EventManager.raising_subscriber_errors`, which re-raises subscriber errors
-> after rolling back so the task fails instead of reporting success.
+> the step that published it still commits. The `strata:events` publish rake
+> tasks therefore exit 0 even when a subscriber fails; they log that failures
+> are reported through `Rails.error` rather than claiming success.
 
 ## Delivery plan
 
