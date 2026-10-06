@@ -127,11 +127,18 @@ module Strata
         subscriptions.clear
         @listening = false
       end
-    end
 
-    private
+      # @return [Symbol] :transitioned if a case was started or at least one resolved case
+      #   moved, otherwise :no_match
+      def handle_event(event)
+        Rails.logger.debug "Handling event: #{event[:name]} with payload: #{event[:payload]}"
 
-    class << self
+        outcomes = start_event?(event[:name]) ? [ start_case(event) ] : transition_cases(event)
+        outcomes.include?(:transitioned) ? :transitioned : :no_match
+      end
+
+      private
+
       def create_case_from_event(event)
         Rails.logger.debug "Creating case from event: #{event[:name]} with payload: #{event[:payload]}"
         handler = start_events[event[:name]]
@@ -144,15 +151,6 @@ module Strata
 
       def get_event_names
         transitions.values.flat_map(&:keys).uniq | start_events.keys
-      end
-
-      # @return [Symbol] :transitioned if a case was started or at least one resolved case
-      #   moved, otherwise :no_match
-      def handle_event(event)
-        Rails.logger.debug "Handling event: #{event[:name]} with payload: #{event[:payload]}"
-
-        outcomes = start_event?(event[:name]) ? [ start_case(event) ] : transition_cases(event)
-        outcomes.include?(:transitioned) ? :transitioned : :no_match
       end
 
       def start_case(event)
