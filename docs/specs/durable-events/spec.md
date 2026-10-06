@@ -278,7 +278,7 @@ process handler emits one structured outcome log per resolved case. Each entry
 includes at least the event name, subscriber key, case type, case ID, and
 `:transitioned` or `:no_match` outcome.
 
-> **Implemented** in [#384](https://github.com/navapbc/strata-sdk-rails/pull/384):
+> **Implemented**:
 > the `transition_to_next_step` and `handle_event` return values above. A later
 > slice adds the per-case structured outcome log: one `Rails.logger.info` line
 > per started or resolved case:
@@ -388,7 +388,7 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 
 | Slice | Phase | Status |
 | --- | --- | --- |
-| Handler outcome contract: transitions return `:transitioned` or `:no_match` | 1 | Done — [#384](https://github.com/navapbc/strata-sdk-rails/pull/384) |
+| Handler outcome contract: transitions return `:transitioned` or `:no_match` | 1 | Done |
 | Per-case structured outcome log | 1 | In review |
 | Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | Not started |
 | Event and delivery persistence | 2 | Not started |
