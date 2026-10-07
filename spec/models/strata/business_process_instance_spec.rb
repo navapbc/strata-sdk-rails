@@ -64,6 +64,18 @@ RSpec.describe Strata::BusinessProcessInstance do
           .to raise_error(StandardError, 'boom')
         expect(kase.reload.business_process_instance.current_step).to eq('applicant_task')
       end
+
+      it "leaves the case on its previous step when the caller rescues inside its own transaction" do
+        business_process_instance
+
+        ActiveRecord::Base.transaction do
+          business_process_instance.transition_to_next_step({ name: 'event4', payload: { case_id: kase.id } })
+        rescue StandardError
+          nil
+        end
+
+        expect(kase.reload.business_process_instance.current_step).to eq('applicant_task')
+      end
     end
   end
 
@@ -78,6 +90,18 @@ RSpec.describe Strata::BusinessProcessInstance do
       it 'raises and does not record the start step' do
         expect { business_process_instance.start_from_event({ name: 'TestApplicationFormCreated', payload: {} }) }
           .to raise_error(StandardError, 'boom')
+        expect(kase.reload.business_process_instance.current_step).to be_nil
+      end
+
+      it "does not record the start step when the caller rescues inside its own transaction" do
+        business_process_instance
+
+        ActiveRecord::Base.transaction do
+          business_process_instance.start_from_event({ name: 'TestApplicationFormCreated', payload: {} })
+        rescue StandardError
+          nil
+        end
+
         expect(kase.reload.business_process_instance.current_step).to be_nil
       end
     end

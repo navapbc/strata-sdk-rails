@@ -51,7 +51,7 @@ module Strata
 
     def start_from_event(event)
       Rails.logger.debug "Starting business process from event: #{event[:name]} with payload: #{event[:payload]}"
-      self.case.transaction do
+      self.case.transaction(requires_new: true) do
         self.current_step = business_process.start_step_name
         self.case.save!
         execute_current_step
@@ -68,7 +68,7 @@ module Strata
       return :no_match unless next_step
 
       Rails.logger.debug "Transitioning to step #{next_step} and executing the step"
-      self.case.transaction do
+      self.case.transaction(requires_new: true) do
         self.current_step = next_step
         self.case.save!
         execute_current_step
