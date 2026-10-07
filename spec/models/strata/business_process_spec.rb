@@ -246,9 +246,11 @@ RSpec.describe Strata::BusinessProcess do
         allow(business_process.get_step('staff_task_2')).to receive(:execute).and_raise(StandardError, 'boom')
       end
 
-      it 'keeps the transition into the system process and rolls back only the failed one' do
+      it 'keeps the case in the system process when the handler it triggered fails' do
         expect { Strata::EventManager.publish('event1', { case_id: kase.id }) }.not_to raise_error
 
+        expect(business_process.get_step('staff_task_2')).to have_received(:execute)
+        expect(Rails.error).to have_received(:report).once
         expect(kase.reload.business_process_instance.current_step).to eq('system_process')
       end
     end
