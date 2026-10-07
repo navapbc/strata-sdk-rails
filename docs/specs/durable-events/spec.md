@@ -354,8 +354,10 @@ rescue keeps the form or task saved while rolling back the failed case step.
 > savepoint (`transaction(requires_new: true)`), rescuing `StandardError`,
 > logging it, and reporting it via `Rails.error.report(handled: true)`. A
 > failure rolls back everything that subscriber changed for the event,
-> including every case it moved. The `end` step uses `close!`, so a failed close
-> also rolls back. A start event creates the case and runs its first step in
+> including every case it moved. Until Phase 3 adds retries, nothing replays
+> that event, so when one of several resolved cases fails, all of them stay on
+> their previous step until the event is republished. The `end` step uses
+> `close!`, so a failed close also rolls back. A start event creates the case and runs its first step in
 > one transaction, so a failed first step leaves no case behind.
 >
 > The rescue applies at every publish, including events published by a system
@@ -590,6 +592,18 @@ Resolved:
    and then returns to the same named step. The migration generator must cover
    new case tables, and existing hosts must add the field before enabling
    durability.
+
+Remaining risks:
+
+1. **The design assumes one current step per case.** A case stores a single
+   `business_process_current_step`, and the transition version, conditional
+   updates, and per-subscriber delivery all build on that. Parallel steps
+   within one case would need the current step and transition version tracked
+   per branch, and deliveries that fan out per branch so each branch retries
+   and completes on its own; otherwise branches of one case would contend on
+   the case-level version and a failed branch would roll back the others.
+   Decide whether parallel steps are planned before Phase 2 creates the
+   delivery tables.
 
 ## Explicitly out of scope
 
