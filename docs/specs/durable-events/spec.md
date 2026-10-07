@@ -348,23 +348,25 @@ Exception propagation must not land by itself while handlers still run inside
 the publisher's transaction. Until durable jobs exist, a publish-boundary
 rescue keeps the form or task saved while rolling back the failed case step.
 
-> **Implemented** (fixes 1 and 4, plus the rescue): `start_from_event` and
-> `transition_to_next_step` save and execute the step in one transaction; step
-> exceptions propagate; and `EventManager.subscribe` runs each subscriber in a
-> savepoint (`transaction(requires_new: true)`), rescuing `StandardError`,
-> logging it, and reporting it via `Rails.error.report(handled: true)`. A
-> failure rolls back everything that subscriber changed for the event,
-> including every case it moved. Until Phase 3 adds retries, nothing replays
-> that event, so when one of several resolved cases fails, all of them stay on
-> their previous step until the event is republished. The `end` step uses
-> `close!`, so a failed close also rolls back. A start event creates the case and runs its first step in
-> one transaction, so a failed first step leaves no case behind.
+> **Implemented** (fixes 1 and 4, plus the rescue):
 >
-> The rescue applies at every publish, including events published by a system
-> process step: a failed nested handler rolls back only its own changes, and
-> the step that published it still commits. The `strata:events` publish rake
-> tasks therefore exit 0 even when a subscriber fails; they log that failures
-> are reported through `Rails.error` rather than claiming success.
+> - Each step is saved and run in one transaction. If the step raises, the case
+>   stays on its previous step and the error propagates. This includes the
+>   `end` step, which now uses `close!`.
+> - A start event creates the case and runs its first step together, so a
+>   failed first step leaves no case behind.
+> - `EventManager` runs each subscriber in a savepoint. If it raises, its
+>   changes roll back, and the error is logged and sent to `Rails.error`. The
+>   publisher's own write is kept.
+> - A subscriber's changes roll back as a whole. If an event matches several
+>   cases and one fails, none of them move. Until Phase 3 adds retries, they
+>   stay put until the event is published again.
+> - Every publish catches its own subscribers' errors, including publishes made
+>   by a system process step. That step still commits if a handler it
+>   triggered fails.
+> - The `strata:events` publish rake tasks exit 0 even if a subscriber fails.
+>   Their log message says failures go to `Rails.error` instead of claiming
+>   success.
 
 ## Delivery plan
 
