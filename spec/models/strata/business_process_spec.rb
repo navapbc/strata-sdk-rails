@@ -208,9 +208,9 @@ RSpec.describe Strata::BusinessProcess do
       it 'raises and leaves no new case behind' do
         event = { name: 'TestApplicationFormCreated', payload: { application_form_id: application_form.id } }
 
-        expect { business_process.handle_event(event) }.to raise_error(StandardError, 'boom')
-
-        expect(TestCase.where(application_form_id: application_form.id).count).to eq(1)
+        expect {
+          expect { business_process.handle_event(event) }.to raise_error(StandardError, 'boom')
+        }.not_to change { TestCase.where(application_form_id: application_form.id).count }
       end
     end
 
