@@ -153,9 +153,11 @@ module Strata
         transitions.values.flat_map(&:keys).uniq | start_events.keys
       end
 
+      # Creates the case and runs its first step together, so a failed step leaves no case behind.
       def start_case(event)
-        kase = create_case_from_event(event)
-        kase.business_process_instance.start_from_event(event)
+        kase = case_class.transaction(requires_new: true) do
+          create_case_from_event(event).tap { |created| created.business_process_instance.start_from_event(event) }
+        end
         log_outcome(event, kase, :transitioned)
       end
 

@@ -12,7 +12,7 @@ namespace :strata do
 
       Strata::EventManager.publish(event_name)
 
-      Rails.logger.info "Event '#{event_name}' emitted successfully"
+      Rails.logger.info "Event '#{event_name}' published. Subscriber failures are logged and reported via Rails.error."
     end
 
     desc "Publish a specified Strata event for a given case with a given ID"
@@ -23,7 +23,8 @@ namespace :strata do
       kase = constantized_case_class.find(case_id)
       Strata::EventManager.publish(event_name, { kase: kase })
 
-      Rails.logger.info "Event '#{event_name}' emitted for '#{case_class}' with ID '#{case_id}'"
+      Rails.logger.info "Event '#{event_name}' published for '#{case_class}' with ID '#{case_id}'. " \
+        "Subscriber failures are logged and reported via Rails.error."
     end
   end
 end

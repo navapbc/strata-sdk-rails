@@ -39,7 +39,7 @@ RSpec.describe 'strata:events', type: :task do
         task.invoke(event_name)
 
         expect(Strata::EventManager).to have_received(:publish).with(event_name)
-        expect(Rails.logger).to have_received(:info).with(/Event '#{event_name}' emitted successfully/)
+        expect(Rails.logger).to have_received(:info).with(/Event '#{event_name}' published/)
       end
     end
   end
@@ -92,7 +92,7 @@ RSpec.describe 'strata:events', type: :task do
         task.invoke(event_name, "TestCase", case_id)
 
         expect(Strata::EventManager).to have_received(:publish).with(event_name, hash_including(kase: test_case))
-        expect(Rails.logger).to have_received(:info).with(/Event '#{event_name}' emitted for 'TestCase' with ID '#{case_id}'/)
+        expect(Rails.logger).to have_received(:info).with(/Event '#{event_name}' published for 'TestCase' with ID '#{case_id}'/)
       end
     end
   end
