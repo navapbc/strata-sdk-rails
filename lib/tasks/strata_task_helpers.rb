@@ -12,7 +12,7 @@ module StrataTaskHelpers
     required_keys.map { |k| args[k] }
   end
 
-  # Exits non-zero, listing each failure, when an EventManager publish reports failed subscribers.
+  # Exits non-zero, listing each failure, when EventManager.publish_reporting_failures returns failed subscribers.
   def abort_on_subscriber_failures!(description, failures)
     return if failures.empty?
 

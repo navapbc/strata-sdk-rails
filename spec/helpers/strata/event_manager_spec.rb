@@ -114,6 +114,15 @@ RSpec.describe Strata::EventManager do
   end
 
   describe '.publish return value' do
+    it 'returns nil even when a subscriber fails' do
+      allow(Rails.error).to receive(:report)
+      subscribe('SomethingHappened', ->(_event) { raise StandardError, 'lambda failed' })
+
+      expect(described_class.publish('SomethingHappened', {})).to be_nil
+    end
+  end
+
+  describe '.publish_reporting_failures' do
     before do
       allow(Rails.error).to receive(:report)
     end
@@ -121,11 +130,20 @@ RSpec.describe Strata::EventManager do
     it 'returns no failures when every subscriber succeeds' do
       subscribe('SomethingHappened', ->(_event) { })
 
-      expect(described_class.publish('SomethingHappened', {})).to eq([])
+      expect(described_class.publish_reporting_failures('SomethingHappened', {})).to eq([])
     end
 
     it 'returns no failures when nothing is subscribed' do
-      expect(described_class.publish('NobodyListens', {})).to eq([])
+      expect(described_class.publish_reporting_failures('NobodyListens', {})).to eq([])
+    end
+
+    it 'delivers the payload to subscribers like publish does' do
+      received = []
+      subscribe('SomethingHappened', ->(event) { received << event })
+
+      described_class.publish_reporting_failures('SomethingHappened', { case_id: 'abc' })
+
+      expect(received).to eq([ { name: 'SomethingHappened', payload: { case_id: 'abc' } } ])
     end
 
     it 'returns the subscriber and error for each failing subscriber' do
@@ -133,7 +151,7 @@ RSpec.describe Strata::EventManager do
       subscribe('SomethingHappened', ->(_event) { })
       subscribe('SomethingHappened', ->(_event) { raise ArgumentError, 'lambda failed' })
 
-      failures = described_class.publish('SomethingHappened', {})
+      failures = described_class.publish_reporting_failures('SomethingHappened', {})
 
       expect(failures).to contain_exactly(
         { subscriber: 'EventManagerSpecHandlers.create_case_then_fail', error: an_instance_of(StandardError).and(having_attributes(message: 'handler failed')) },
@@ -142,14 +160,15 @@ RSpec.describe Strata::EventManager do
     end
 
     it 'does not include failures from events published by a subscriber' do
-      inner_failures = nil
       subscribe('InnerEvent', ->(_event) { raise StandardError, 'inner failed' })
-      subscribe('OuterEvent', ->(_event) { inner_failures = described_class.publish('InnerEvent', {}) })
+      subscribe('OuterEvent', ->(_event) { described_class.publish('InnerEvent', {}) })
 
-      outer_failures = described_class.publish('OuterEvent', {})
+      outer_failures = described_class.publish_reporting_failures('OuterEvent', {})
 
       expect(outer_failures).to eq([])
-      expect(inner_failures).to contain_exactly({ subscriber: 'Proc', error: having_attributes(message: 'inner failed') })
+      expect(Rails.error).to have_received(:report).with(
+        having_attributes(message: 'inner failed'), hash_including(context: hash_including(event: 'InnerEvent'))
+      )
     end
   end
 end

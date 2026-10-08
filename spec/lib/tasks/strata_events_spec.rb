@@ -16,7 +16,7 @@ RSpec.describe 'strata:events', type: :task do
     Rake.application.rake_require('tasks/strata_events')
     Rake::Task.define_task(:environment)
     stub_const('Strata::EventManager', event_manager)
-    allow(Strata::EventManager).to receive(:publish).and_return([])
+    allow(Strata::EventManager).to receive(:publish_reporting_failures).and_return([])
   end
 
   describe 'publish_event' do
@@ -44,14 +44,14 @@ RSpec.describe 'strata:events', type: :task do
 
         task.invoke(event_name)
 
-        expect(Strata::EventManager).to have_received(:publish).with(event_name)
+        expect(Strata::EventManager).to have_received(:publish_reporting_failures).with(event_name)
         expect(Rails.logger).to have_received(:info).with(/Event '#{event_name}' published/)
       end
     end
 
     describe 'when a subscriber fails' do
       before do
-        allow(Strata::EventManager).to receive(:publish).and_return(failures)
+        allow(Strata::EventManager).to receive(:publish_reporting_failures).and_return(failures)
       end
 
       it 'exits non-zero and names each failed subscriber and its error' do
@@ -116,7 +116,7 @@ RSpec.describe 'strata:events', type: :task do
 
         task.invoke(event_name, "TestCase", case_id)
 
-        expect(Strata::EventManager).to have_received(:publish).with(event_name, hash_including(kase: test_case))
+        expect(Strata::EventManager).to have_received(:publish_reporting_failures).with(event_name, hash_including(kase: test_case))
         expect(Rails.logger).to have_received(:info).with(/Event '#{event_name}' published for 'TestCase' with ID '#{case_id}'/)
       end
     end
@@ -124,7 +124,7 @@ RSpec.describe 'strata:events', type: :task do
     describe 'when a subscriber fails' do
       before do
         allow(TestCase).to receive(:find).and_return(instance_double(TestCase))
-        allow(Strata::EventManager).to receive(:publish).and_return(failures)
+        allow(Strata::EventManager).to receive(:publish_reporting_failures).and_return(failures)
       end
 
       it 'exits non-zero and names the case and each failed subscriber and its error' do

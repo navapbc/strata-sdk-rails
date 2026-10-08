@@ -57,10 +57,23 @@ module Strata
       #
       # @param [String] event_key The name of the event to publish
       # @param [Hash] payload The event payload data
+      # @return [void]
+      def publish(event_key, payload = {})
+        publish_reporting_failures(event_key, payload)
+        nil
+      end
+
+      # Publishes an event like {publish} and returns the subscribers that failed.
+      # Used by the strata:events rake tasks so an operator republishing an event can
+      # tell whether it worked. Temporary until durable delivery records failures
+      # (see docs/specs/durable-events/spec.md).
+      #
+      # @param [String] event_key The name of the event to publish
+      # @param [Hash] payload The event payload data
       # @return [Array<Hash>] One { subscriber:, error: } entry per subscriber that raised
       #   while handling this event. Failures from events those subscribers publish are
-      #   returned by those inner publishes, not this one.
-      def publish(event_key, payload = {})
+      #   not included.
+      def publish_reporting_failures(event_key, payload = {})
         Rails.logger.debug "Event Manager: Publishing event '#{event_key}' with payload: #{payload.inspect}"
         failures = []
         outer_failures = current_failures
