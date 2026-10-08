@@ -2,15 +2,17 @@
 
 require 'rails_helper'
 
-module EventManagerSpecHandlers
-  def self.create_case_then_fail(_event)
-    TestCase.create!(business_process_current_step: 'from_failing_handler')
-    raise StandardError, 'handler failed'
-  end
-end
-
 RSpec.describe Strata::EventManager do
   let(:subscriptions) { [] }
+
+  before do
+    stub_const('EventManagerSpecHandlers', Module.new do
+      def self.create_case_then_fail(_event)
+        TestCase.create!(business_process_current_step: 'from_failing_handler')
+        raise StandardError, 'handler failed'
+      end
+    end)
+  end
 
   def subscribe(event_key, callback)
     subscriptions << described_class.subscribe(event_key, callback)
