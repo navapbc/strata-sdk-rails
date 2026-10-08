@@ -364,9 +364,10 @@ rescue keeps the form or task saved while rolling back the failed case step.
 > - Every publish catches its own subscribers' errors, including publishes made
 >   by a system process step. That step still commits if a handler it
 >   triggered fails.
-> - The `strata:events` publish rake tasks exit 0 even if a subscriber fails.
->   Their log message says failures go to `Rails.error` instead of claiming
->   success.
+> - `EventManager.publish` returns the subscribers that failed. The
+>   `strata:events` publish rake tasks print them and exit 1, so an operator
+>   republishing an event for a stuck case can see whether it worked. Failures
+>   in events a subscriber publishes are not included.
 
 ## Delivery plan
 

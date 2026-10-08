@@ -64,6 +64,7 @@ RSpec.describe Strata::EventManager do
       expect(Rails.error).to have_received(:report).with(
         an_instance_of(StandardError).and(having_attributes(message: 'handler failed')),
         handled: true,
+        severity: :error,
         context: { event: 'SomethingHappened', subscriber: 'EventManagerSpecHandlers.create_case_then_fail' }
       )
     end
@@ -76,18 +77,79 @@ RSpec.describe Strata::EventManager do
       expect(Rails.error).to have_received(:report).with(
         an_instance_of(StandardError),
         handled: true,
+        severity: :error,
         context: { event: 'SomethingElseHappened', subscriber: 'Proc' }
       )
     end
 
-    it 'logs the error with the event and subscriber' do
+    it 'logs the error with the event, subscriber, and backtrace' do
       allow(Rails.logger).to receive(:error)
 
       described_class.publish('SomethingHappened', { case_id: 'abc' })
 
       expect(Rails.logger).to have_received(:error).with(
-        a_string_including('SomethingHappened', 'EventManagerSpecHandlers.create_case_then_fail', 'handler failed')
+        a_string_including(
+          'SomethingHappened',
+          'EventManagerSpecHandlers.create_case_then_fail',
+          'handler failed',
+          'event_manager_spec.rb'
+        )
       )
+    end
+  end
+
+  describe 'when a subscriber raises an exception that is not a StandardError' do
+    let(:fatal_error_class) { Class.new(Exception) } # rubocop:disable Lint/InheritException
+
+    before do
+      allow(Rails.error).to receive(:report)
+      error_class = fatal_error_class
+      subscribe('SomethingHappened', ->(_event) { raise error_class, 'fatal' })
+    end
+
+    it 'propagates to the publisher without reporting it' do
+      expect { described_class.publish('SomethingHappened', {}) }.to raise_error(fatal_error_class, 'fatal')
+      expect(Rails.error).not_to have_received(:report)
+    end
+  end
+
+  describe '.publish return value' do
+    before do
+      allow(Rails.error).to receive(:report)
+    end
+
+    it 'returns no failures when every subscriber succeeds' do
+      subscribe('SomethingHappened', ->(_event) { })
+
+      expect(described_class.publish('SomethingHappened', {})).to eq([])
+    end
+
+    it 'returns no failures when nothing is subscribed' do
+      expect(described_class.publish('NobodyListens', {})).to eq([])
+    end
+
+    it 'returns the subscriber and error for each failing subscriber' do
+      subscribe('SomethingHappened', EventManagerSpecHandlers.method(:create_case_then_fail))
+      subscribe('SomethingHappened', ->(_event) { })
+      subscribe('SomethingHappened', ->(_event) { raise ArgumentError, 'lambda failed' })
+
+      failures = described_class.publish('SomethingHappened', {})
+
+      expect(failures).to contain_exactly(
+        { subscriber: 'EventManagerSpecHandlers.create_case_then_fail', error: an_instance_of(StandardError).and(having_attributes(message: 'handler failed')) },
+        { subscriber: 'Proc', error: an_instance_of(ArgumentError).and(having_attributes(message: 'lambda failed')) }
+      )
+    end
+
+    it 'does not include failures from events published by a subscriber' do
+      inner_failures = nil
+      subscribe('InnerEvent', ->(_event) { raise StandardError, 'inner failed' })
+      subscribe('OuterEvent', ->(_event) { inner_failures = described_class.publish('InnerEvent', {}) })
+
+      outer_failures = described_class.publish('OuterEvent', {})
+
+      expect(outer_failures).to eq([])
+      expect(inner_failures).to contain_exactly({ subscriber: 'Proc', error: having_attributes(message: 'inner failed') })
     end
   end
 end
