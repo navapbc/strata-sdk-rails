@@ -59,29 +59,8 @@ module Strata
       # @param [Hash] payload The event payload data
       # @return [void]
       def publish(event_key, payload = {})
-        publish_reporting_failures(event_key, payload)
-        nil
-      end
-
-      # Publishes an event like {publish} and returns the subscribers that failed.
-      # Used by the strata:events rake tasks so an operator republishing an event can
-      # tell whether it worked. Temporary until durable delivery records failures
-      # (see docs/specs/durable-events/spec.md).
-      #
-      # @param [String] event_key The name of the event to publish
-      # @param [Hash] payload The event payload data
-      # @return [Array<Hash>] One { subscriber:, error: } entry per subscriber that raised
-      #   while handling this event. Failures from events those subscribers publish are
-      #   not included.
-      def publish_reporting_failures(event_key, payload = {})
         Rails.logger.debug "Event Manager: Publishing event '#{event_key}' with payload: #{payload.inspect}"
-        failures = []
-        outer_failures = current_failures
-        self.current_failures = failures
         ActiveSupport::Notifications.instrument(event_key, payload)
-        failures
-      ensure
-        self.current_failures = outer_failures
       end
 
       private
@@ -95,19 +74,9 @@ module Strata
         end
       rescue StandardError => e
         subscriber = subscriber_name(callback)
-        current_failures&.push({ subscriber: subscriber, error: e })
         Rails.logger.error "Event Manager: Subscriber #{subscriber} failed handling event '#{event[:name]}' - " \
           "#{e.full_message(highlight: false)}"
         Rails.error.report(e, handled: true, severity: :error, context: { event: event[:name], subscriber: subscriber })
-      end
-
-      # Failures collected for the innermost publish on this thread or fiber.
-      def current_failures
-        ActiveSupport::IsolatedExecutionState[:strata_event_manager_failures]
-      end
-
-      def current_failures=(failures)
-        ActiveSupport::IsolatedExecutionState[:strata_event_manager_failures] = failures
       end
 
       def subscriber_name(callback)

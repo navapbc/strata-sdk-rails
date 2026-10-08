@@ -10,10 +10,9 @@ namespace :strata do
     task :publish_event, [ :event_name ] => [ :environment ] do |t, args|
       event_name = fetch_required_args!(args, :event_name).first
 
-      failures = Strata::EventManager.publish_reporting_failures(event_name)
-      abort_on_subscriber_failures!("Event '#{event_name}'", failures)
+      Strata::EventManager.publish(event_name)
 
-      Rails.logger.info "Event '#{event_name}' published."
+      Rails.logger.info "Event '#{event_name}' published. Subscriber failures are logged and reported via Rails.error."
     end
 
     desc "Publish a specified Strata event for a given case with a given ID"
@@ -22,10 +21,10 @@ namespace :strata do
       constantized_case_class = case_class.constantize
 
       kase = constantized_case_class.find(case_id)
-      failures = Strata::EventManager.publish_reporting_failures(event_name, { kase: kase })
-      abort_on_subscriber_failures!("Event '#{event_name}' for '#{case_class}' with ID '#{case_id}'", failures)
+      Strata::EventManager.publish(event_name, { kase: kase })
 
-      Rails.logger.info "Event '#{event_name}' published for '#{case_class}' with ID '#{case_id}'."
+      Rails.logger.info "Event '#{event_name}' published for '#{case_class}' with ID '#{case_id}'. " \
+        "Subscriber failures are logged and reported via Rails.error."
     end
   end
 end

@@ -5,18 +5,12 @@ require 'rake'
 
 RSpec.describe 'strata:events', type: :task do
   let(:event_manager) { class_double(Strata::EventManager) }
-  let(:failures) do
-    [
-      { subscriber: 'SomeBusinessProcess.handle_event', error: StandardError.new('step failed') },
-      { subscriber: 'Proc', error: ArgumentError.new('lambda failed') }
-    ]
-  end
 
   before do
     Rake.application.rake_require('tasks/strata_events')
     Rake::Task.define_task(:environment)
     stub_const('Strata::EventManager', event_manager)
-    allow(Strata::EventManager).to receive(:publish_reporting_failures).and_return([])
+    allow(Strata::EventManager).to receive(:publish)
   end
 
   describe 'publish_event' do
@@ -44,27 +38,8 @@ RSpec.describe 'strata:events', type: :task do
 
         task.invoke(event_name)
 
-        expect(Strata::EventManager).to have_received(:publish_reporting_failures).with(event_name)
+        expect(Strata::EventManager).to have_received(:publish).with(event_name)
         expect(Rails.logger).to have_received(:info).with(/Event '#{event_name}' published/)
-      end
-    end
-
-    describe 'when a subscriber fails' do
-      before do
-        allow(Strata::EventManager).to receive(:publish_reporting_failures).and_return(failures)
-      end
-
-      it 'exits non-zero and names each failed subscriber and its error' do
-        expect {
-          task.invoke('SomethingHappened')
-        }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
-          .and output(
-            a_string_including(
-              "Event 'SomethingHappened'",
-              'SomeBusinessProcess.handle_event', 'StandardError', 'step failed',
-              'Proc', 'ArgumentError', 'lambda failed'
-            )
-          ).to_stderr
       end
     end
   end
@@ -116,28 +91,8 @@ RSpec.describe 'strata:events', type: :task do
 
         task.invoke(event_name, "TestCase", case_id)
 
-        expect(Strata::EventManager).to have_received(:publish_reporting_failures).with(event_name, hash_including(kase: test_case))
+        expect(Strata::EventManager).to have_received(:publish).with(event_name, hash_including(kase: test_case))
         expect(Rails.logger).to have_received(:info).with(/Event '#{event_name}' published for 'TestCase' with ID '#{case_id}'/)
-      end
-    end
-
-    describe 'when a subscriber fails' do
-      before do
-        allow(TestCase).to receive(:find).and_return(instance_double(TestCase))
-        allow(Strata::EventManager).to receive(:publish_reporting_failures).and_return(failures)
-      end
-
-      it 'exits non-zero and names the case and each failed subscriber and its error' do
-        expect {
-          task.invoke('SomethingHappened', 'TestCase', '123')
-        }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
-          .and output(
-            a_string_including(
-              "Event 'SomethingHappened'", "'TestCase'", "'123'",
-              'SomeBusinessProcess.handle_event', 'StandardError', 'step failed',
-              'Proc', 'ArgumentError', 'lambda failed'
-            )
-          ).to_stderr
       end
     end
   end
