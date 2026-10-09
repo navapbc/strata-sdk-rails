@@ -12,7 +12,7 @@ Examples:
     bin/rails generate strata:model User email:string profile:name birth_date:memorable_date
 
 Supported Strata Attribute Types:
-    name                 - Creates columns: name_first, name_middle, name_last (all :string)
+    name                 - Creates columns: name_first, name_middle, name_last, name_suffix (all :string)
     address              - Creates columns: address_street_line_1, address_street_line_2, address_city, address_state, address_zip_code (all :string)
     money                - Creates columns: money (:integer)
     memorable_date       - Creates columns: memorable_date (:date)

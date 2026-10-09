@@ -18,7 +18,7 @@ Supported Attribute Types:
     date_range           - Creates columns: start, end (both :date)
     memorable_date       - Creates columns: single :date column
     money                - Creates columns: single :integer column (stores cents)
-    name                 - Creates columns: first, middle, last (all :string)
+    name                 - Creates columns: first, middle, last, suffix (all :string)
     tax_id               - Creates columns: single :string column
     us_date              - Creates columns: single :date column
     year_month           - Creates columns: year (:integer), month (:integer)

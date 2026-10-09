@@ -260,7 +260,7 @@ Money attributes automatically handle type conversion and validation. Invalid mo
 
 ## Name Attribute
 
-The Name Attribute provides structured handling of person names with first, middle, and last components.
+The Name Attribute provides structured handling of person names with first, middle, last, and suffix components.
 
 ### Usage in Model
 
@@ -275,23 +275,25 @@ end
 
 ### Database Mapping
 
-A single `name` attribute creates **3 database columns** using the attribute name as a prefix:
+A single `name` attribute creates **4 database columns** using the attribute name as a prefix:
 
 For an attribute named `name`:
 - `name_first` (string)
 - `name_middle` (string)
 - `name_last` (string)
+- `name_suffix` (string)
 
 For an attribute named `owner`:
 - `owner_first` (string)
 - `owner_middle` (string)
 - `owner_last` (string)
+- `owner_suffix` (string)
 
 ### Available Methods
 
 The `Strata::Name` value object provides:
 
-- `first`, `middle`, `last` - Component accessors
+- `first`, `middle`, `last`, `suffix` - Component accessors
 - `full_name` - Returns the complete name with proper spacing
 - `to_s` - Alias for `full_name`
 - `blank?` - Returns true if all components are blank
@@ -306,20 +308,21 @@ The `Strata::Name` value object provides:
 person.name = {
   first: "John",
   middle: "A",
-  last: "Doe"
+  last: "Doe",
+  suffix: "Jr."
 }
 
 # Setting a name with a Strata::Name object
-person.name = Strata::Name.new(first: "John", middle: "A", last: "Doe")
+person.name = Strata::Name.new(first: "John", middle: "A", last: "Doe", suffix: "Jr.")
 
 # Accessing name components
 puts person.name.first # => "John"
-puts person.name.full_name # => "John A Doe"
-puts person.name.to_s # => "John A Doe"
+puts person.name.full_name # => "John A Doe Jr."
+puts person.name.to_s # => "John A Doe Jr."
 
 # Names are comparable for sorting
 names = [person1.name, person2.name, person3.name]
-sorted_names = names.sort # Sorts by last name, then first name, then middle name
+sorted_names = names.sort # Sorts by last name, then first name, then middle name, then suffix
 ```
 
 ### Validation
