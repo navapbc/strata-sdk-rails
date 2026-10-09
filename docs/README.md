@@ -30,6 +30,7 @@ Captured intent for proposed work — what we want and why, recorded before any 
 
 - [Durable events (intent)](./intent/durable-events.md) - Make events survive the process that published them
 - [Durable events (spec)](./specs/durable-events/spec.md) - Requirements and design for the above
+- [Durable events (plan)](./specs/durable-events/plan.md) - Sequenced implementation PRs and proof for the above
 
 ## Miscellaneous
 
