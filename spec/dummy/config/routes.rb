@@ -8,6 +8,7 @@ Rails.application.routes.draw do
   mount Lookbook::Engine, at: "/lookbook"
 
   resources :passport_application_forms, only: [ :index, :new, :show, :create, :edit, :update ]
+  resources :user_facing_ids, only: [ :index ]
 
   resources :sample_application_forms, only: [ :index, :new, :show, :create ] do
     member do

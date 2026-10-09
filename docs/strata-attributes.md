@@ -13,6 +13,7 @@ This document provides comprehensive documentation for all Strata Attributes ava
 - [Range Attribute](#range-attribute)
 - [Tax ID Attribute](#tax-id-attribute)
 - [US Date Attribute](#us-date-attribute)
+- [User Facing ID Attribute](#user-facing-id-attribute)
 - [Year Month Attribute](#year-month-attribute)
 - [Year Quarter Attribute](#year-quarter-attribute)
 
@@ -482,6 +483,153 @@ puts application.submitted_on.year # => 2023
 ### Validation
 
 US date attributes include automatic validation to ensure the date is valid. Invalid dates will add an `:invalid_date` error to the model.
+
+## User Facing ID Attribute
+
+The User Facing ID Attribute provides human-friendly, obfuscated identifiers backed by an integer sequence column. The integer sequence is encoded into a prefixed, segmented string (e.g., `T-Y01-B33-N91`) using a keyed Feistel permutation, so consecutive sequence values produce non-sequential, unpredictable IDs that are safe to expose in URLs and user-facing surfaces.
+
+### Usage in Model
+
+```ruby
+class TestRecord < ApplicationRecord
+  include Strata::Attributes
+
+  strata_attribute :user_facing_id, :user_facing_id, prefix: "T", key: 0x9b6d_42a7
+  strata_attribute :claim_user_facing_id, :user_facing_id, prefix: "CLAIM", key: 0xc7e3_18b5
+end
+```
+
+### Options
+
+- `prefix` (required) — Uppercase alphanumeric prefix used as the first segment of the formatted ID.
+- `key` (required) — Positive integer used to seed the Feistel permutation. There is no default: every attribute must pick a key explicitly. Pass a distinct key per attribute when you want IDs from different attributes to occupy independent encoding spaces. Once an ID has been issued for a given attribute, the key must not be changed — previously issued IDs are bound to the key they were encoded with.
+- `sequence_column` (optional) — Name of the backing integer column. Defaults to `"#{name}_sequence"`.
+- `alphabet` (optional) — Array of uppercase A-Z letters that may appear in the encoded ID. Defaults to `Strata::UserFacingId::Alphabet::DEFAULT` (A-Z minus "I"). Pass a custom alphabet when you want to drop additional confusable letters (for example, "O" vs. "0"). Must be unique single-character uppercase strings, between 1 and 26 letters long. Like `key`, once IDs have been issued for an attribute the alphabet must not be changed — previously issued IDs are bound to the alphabet they were encoded with. See [Alphabet and Capacity](#alphabet-and-capacity) below for the trade-offs of smaller alphabets.
+
+### Database Mapping
+
+A user facing ID attribute is backed by **1 integer column** (typically a `bigserial` so Postgres assigns sequence values automatically):
+
+For an attribute named `user_facing_id`:
+
+- `user_facing_id_sequence` (bigserial / integer)
+
+The encoded string is computed on read; it is not stored in the database.
+
+Example migration:
+
+```ruby
+class AddUserFacingIdSequenceToTestRecords < ActiveRecord::Migration[8.0]
+  def up
+    add_column :test_records, :user_facing_id_sequence, :bigserial, null: false
+    add_index :test_records, :user_facing_id_sequence, unique: true
+  end
+
+  def down
+    remove_index :test_records, :user_facing_id_sequence
+    remove_column :test_records, :user_facing_id_sequence
+  end
+end
+```
+
+### Available Methods
+
+- The attribute reader (e.g., `record.user_facing_id`) returns the formatted, prefixed string.
+- The sequence reader (e.g., `record.user_facing_id_sequence`) returns the underlying integer.
+- The attribute writer accepts either the formatted string or an integer sequence value and stores the integer.
+- Querying through the attribute (e.g., `Model.where(user_facing_id: "T-Y01-B33-N91")`) decodes the formatted ID to its sequence integer before comparing against the column.
+
+### Usage Examples
+
+```ruby
+# Reading
+record.user_facing_id          # => "T-Y01-B33-N91"
+record.user_facing_id_sequence # => 1
+
+# Assigning a formatted string (decodes to the underlying sequence integer)
+record.user_facing_id = "T-Y01-B33-N91"
+record.user_facing_id_sequence # => 1
+
+# Assigning an integer sequence directly
+record.user_facing_id = 42
+record.user_facing_id_sequence # => 42
+
+# Querying by formatted ID
+TestRecord.find_by(user_facing_id: "T-Y01-B33-N91")
+```
+
+### Validation
+
+The prefix is validated at model load time and must contain only letters and digits (`/\A[A-Z0-9]+\z/`); invalid prefixes raise `Strata::UserFacingId::FormatError`.
+
+The alphabet is also validated at model load time. It must be an Array of unique single-character uppercase A-Z strings, between 1 and 26 entries long; anything else raises `Strata::UserFacingId::FormatError`.
+
+At runtime:
+
+- Assigning a malformed formatted string raises `Strata::UserFacingId::Error` (loud failure for debuggability).
+- Querying with a malformed formatted string casts to `nil` so the query simply returns no results rather than raising.
+- Sequence values must fall within the attribute's capacity range; out-of-range values raise `RangeError` during encoding. The capacity is per-attribute and depends on the configured alphabet — see [Alphabet and Capacity](#alphabet-and-capacity).
+
+### Alphabet and Capacity
+
+The alphabet controls which letters may appear in encoded IDs. The default (`Strata::UserFacingId::Alphabet::DEFAULT`) is the 25-letter set `A-Z` minus `"I"`, dropping `"I"` because it is easy to confuse with the digit `1` when an ID is read aloud, written by hand, or printed in a narrow font. Many teams want the same treatment for other confusable letters:
+
+- `"O"` vs. the digit `0`
+- `"S"` vs. the digit `5`
+- `"Z"` vs. the digit `2`
+- `"B"` vs. the digit `8`
+
+You can drop any letters you like by passing your own alphabet:
+
+```ruby
+class TestRecord < ApplicationRecord
+  include Strata::Attributes
+
+  # Default alphabet minus "O" — 24 letters, ~864 million IDs available.
+  strata_attribute :user_facing_id, :user_facing_id,
+    prefix: "T",
+    key: 0x9b6d_42a7,
+    alphabet: %w[A B C D E F G H J K L M N P Q R S T U V W X Y Z]
+end
+```
+
+#### How the alphabet affects capacity
+
+Every ID is a prefix plus three segments of one letter and two digits (e.g., `T-Y01-B33-N91`). So the total number of *distinct* IDs an attribute can produce is roughly `(letters_in_alphabet * 100) ^ 3 / 16` — three independent segments, each with `letters * 100` possible values, divided by 16 because the codec reserves four bits for an error-detection checksum.
+
+Removing a letter shrinks each segment's possibilities, and because there are three segments, the total capacity shrinks by *roughly* the cube of that ratio:
+
+- Dropping one letter (25 → 24) costs about **12%** of capacity
+- Dropping two letters (25 → 23) costs about **22%** of capacity
+- Dropping five letters (25 → 20) costs about **49%** of capacity
+
+In practice, every supported alphabet still leaves room for hundreds of millions of IDs per attribute — more than enough for almost any application — but it is worth knowing the trade-off when picking how aggressive to be about excluding confusable letters.
+
+#### Capacity table
+
+| Alphabet length | Example exclusions | Max sequence value (per attribute) | Approximate IDs available |
+|---|---|---|---|
+| 26 (full A-Z) | none (includes "I") | 1,073,741,823 | ~1.07 billion (Feistel ceiling) |
+| 25 (default) | "I" | 976,562,499 | ~976 million |
+| 24 | "I", "O" | 863,999,999 | ~864 million |
+| 23 | "I", "O", "S" | 760,437,499 | ~760 million |
+| 22 | "I", "O", "S", "Z" | 665,499,999 | ~665 million |
+| 20 | "I", "O", "S", "Z" + 2 more | 499,999,999 | ~500 million |
+
+#### Upper limit: 26 letters
+
+The encoder uses a 30-bit Feistel permutation under the hood, which caps the encodable space at `2^30 = 1,073,741,824` values. A full 26-letter alphabet would technically allow `(26 * 100)^3 / 16 ≈ 1.10 billion` IDs by the segment math, but the Feistel ceiling binds first, so the effective limit for a 26-letter alphabet is the Feistel ceiling (`Strata::UserFacingId::Feistel::DOMAIN_SIZE - 1`). Going from 25 to 26 letters therefore only buys you about 10% more capacity, not the 12% the cube would suggest. Alphabets longer than 26 letters are rejected at model load time.
+
+#### Picking an alphabet — guidance
+
+- The default (`A-Z` minus `"I"`) is a reasonable starting point for most applications.
+- If your IDs will be read aloud, dictated over the phone, or copied by hand, dropping `"O"` and `"S"` is usually worth the ~22% capacity hit. The result is still ~760 million IDs.
+- If your IDs only ever appear in URLs or copy/pasted from a UI, the default is fine — confusable letters are less of a problem when humans never re-type the ID.
+- Avoid going below 20 letters unless you have a very small expected ID volume. The 30-bit permutation domain stays the same regardless of alphabet, so cycle-walk rejection rates climb steeply at small alphabet sizes, slowing encoding (though never enough to be noticeable in normal application use).
+
+#### Don't change the alphabet after issuance
+
+Just like `key`, the alphabet is part of the encoding contract. Once an attribute has issued IDs to users, changing the alphabet will make every previously issued ID undecodable — the backing sequence column is unaffected, but `find_by(user_facing_id: "...")` queries from emails, bookmarks, or older URLs will silently return no results. Pick the alphabet you want before going to production and treat it as immutable from that point on.
 
 ## Year Month Attribute
 

@@ -103,6 +103,7 @@ The following attribute types are supported across various generators:
 - `year_quarter` - Creates year and quarter integer columns
 - `date_range` - Creates start and end date columns
 - `array` - Creates a jsonb column for storing arrays of objects
+- `user_facing_id` - Creates a `bigserial` sequence column with a unique index (the backing column for `Strata::Attributes::UserFacingIdAttribute`)
 
 For more details on each generator, you can run:
 

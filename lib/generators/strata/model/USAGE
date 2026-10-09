@@ -19,6 +19,7 @@ Supported Strata Attribute Types:
     us_date              - Creates columns: us_date (:date)
     tax_id               - Creates columns: tax_id (:string)
     year_quarter         - Creates columns: year_quarter_year (:integer), year_quarter_quarter (:integer)
+    user_facing_id       - Creates column: NAME_sequence (:bigserial, unique index). Emits a strata_attribute declaration with a freshly randomized key and a "TODO" prefix that you must replace before use.
 
 This will create:
     A Rails model file that includes Strata::Attributes with the appropriate strata_attribute declarations

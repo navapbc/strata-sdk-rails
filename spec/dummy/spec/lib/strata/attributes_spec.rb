@@ -24,6 +24,7 @@ RSpec.describe Strata::Attributes do
 
       expect(registry).not_to have_key(:weekly_wage)
       expect(registry).not_to have_key(:tax_id)
+      expect(registry).not_to have_key(:user_facing_id)
       expect(registry).not_to have_key(:adopted_on)
       expect(registry).not_to have_key(:reporting_period)
       expect(registry).not_to have_key(:activity_reporting_period)

@@ -1,0 +1,33 @@
+<div class="grid-container padding-y-5">
+  <div class="margin-bottom-4">
+    <%= link_to "Back to dummy app", root_path, class: "usa-link" %>
+  </div>
+  <h1 class="font-sans-2xl margin-bottom-1">User-Facing IDs</h1>
+  <p class="measure-5 line-height-sans-4 margin-top-0">
+    Test records rendered with the integer values stored in Postgres and the formatted IDs shown to users.
+  </p>
+  <div class="overflow-x-auto margin-top-4">
+    <table class="usa-table usa-table--borderless width-full">
+      <thead>
+        <tr>
+          <th scope="col">Record</th>
+          <th scope="col">T ID (int)</th>
+          <th scope="col">T ID</th>
+          <th scope="col">CLAIM ID (int)</th>
+          <th scope="col">CLAIM ID</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @test_records.each_with_index do |record, index| %>
+          <tr>
+            <th scope="row">Test record <%= index + 1 %></th>
+            <td><code><%= record.user_facing_id_sequence %></code></td>
+            <td><strong><%= record.user_facing_id %></strong></td>
+            <td><code><%= record.claim_user_facing_id_sequence %></code></td>
+            <td><strong><%= record.claim_user_facing_id %></strong></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+</div>
