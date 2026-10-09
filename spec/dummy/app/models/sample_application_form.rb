@@ -4,6 +4,8 @@ class SampleApplicationForm < Strata::ApplicationForm
   include Strata::Flows::ApplicationFormValidations
   validate_flow SampleFlow
 
+  has_many :sample_employment_details, -> { order(:id) }, dependent: :destroy
+
   strata_attribute :date_of_birth, :memorable_date
 
   validates :applicant_name_first, presence: true, on: Flow::NAME

@@ -40,6 +40,107 @@ RSpec.describe Strata::Flows::QuestionPage do
       expect(page.edit_pathname).to eq("edit_first_name")
       expect(page.update_pathname).to eq("update_first_name")
     end
+
+    it "is not in a loop" do
+      expect(page).not_to be_in_loop
+    end
+  end
+
+  describe "with an enclosing loop" do
+    let(:loop_node) { Strata::Flows::Loop.new(:prior_employer, association: :sample_employment_details) }
+    let(:page) { described_class.new("business_name", loop: loop_node) }
+
+    it "is marked as in a loop" do
+      expect(page).to be_in_loop
+      expect(page.loop).to eq(loop_node)
+    end
+
+    it "namespaces edit_pathname and update_pathname by the loop name" do
+      expect(page.edit_pathname).to eq("edit_prior_employer_business_name")
+      expect(page.update_pathname).to eq("update_prior_employer_business_name")
+    end
+
+    context "with stubbed parent and child classes" do
+      before do
+        parent_class = Class.new { def self.name = "SampleApplicationForm" }
+        child_class = Class.new { def self.name = "SampleEmploymentDetail" }
+        stub_const("SampleApplicationForm", parent_class)
+        stub_const("SampleEmploymentDetail", child_class)
+      end
+
+      let(:flow_record) { SampleApplicationForm.new }
+      let(:child_record) { SampleEmploymentDetail.new }
+
+      it "uses the nested route helper for edit_path, passing parent and child" do
+        allow(page).to receive(:edit_prior_employer_business_name_sample_application_form_sample_employment_detail_path)
+          .and_return("/sample_application_forms/1/sample_employment_details/2/edit_prior_employer_business_name")
+
+        expect(page.edit_path(flow_record, child_record))
+          .to eq("/sample_application_forms/1/sample_employment_details/2/edit_prior_employer_business_name")
+        expect(page).to have_received(:edit_prior_employer_business_name_sample_application_form_sample_employment_detail_path)
+          .with(flow_record, child_record)
+      end
+
+      it "uses the nested route helper for update_path, passing parent and child" do
+        allow(page).to receive(:update_prior_employer_business_name_sample_application_form_sample_employment_detail_path)
+          .and_return("/sample_application_forms/1/sample_employment_details/2/update_prior_employer_business_name")
+
+        expect(page.update_path(flow_record, child_record))
+          .to eq("/sample_application_forms/1/sample_employment_details/2/update_prior_employer_business_name")
+        expect(page).to have_received(:update_prior_employer_business_name_sample_application_form_sample_employment_detail_path)
+          .with(flow_record, child_record)
+      end
+
+      it "builds the helper name from the singularized association name (not the child class name)" do
+        # Capture the symbol passed to `send` to verify we route through association.singularize.
+        captured_method = nil
+        allow(page).to receive(:send).and_wrap_original do |original, method_name, *args|
+          captured_method = method_name
+          "/stubbed"
+        end
+
+        page.edit_path(flow_record, child_record)
+
+        expect(captured_method.to_s).to eq("edit_prior_employer_business_name_sample_application_form_sample_employment_detail_path")
+      end
+    end
+
+    it "evaluates needed?/completed? against the loop record, not the flow record" do
+      child_class = Class.new do
+        include ActiveModel::Model
+        include ActiveModel::Attributes
+        attribute :business_name, :string
+        validates :business_name, presence: true, on: :business_name
+      end
+      stub_const("PriorEmployer", child_class)
+
+      child_record = PriorEmployer.new
+      expect(page).not_to be_completed(child_record)
+
+      child_record.business_name = "Acme"
+      expect(page).to be_completed(child_record)
+    end
+
+    describe "with conditional if" do
+      let(:page) do
+        described_class.new("role", loop: loop_node, if: ->(loop_record) { loop_record.business_name.present? })
+      end
+
+      it "evaluates the predicate against the loop record" do
+        child_class = Class.new do
+          include ActiveModel::Model
+          include ActiveModel::Attributes
+          attribute :business_name, :string
+        end
+        stub_const("PriorEmployer", child_class)
+
+        empty_child = PriorEmployer.new
+        filled_child = PriorEmployer.new(business_name: "Acme")
+
+        expect(page).not_to be_needed(empty_child)
+        expect(page).to be_needed(filled_child)
+      end
+    end
   end
 
   describe "with conditional if" do

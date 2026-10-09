@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_04_221320) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_20_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -56,7 +56,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_04_221320) do
     t.string "leave_type"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.boolean "reviewed", default: false
+  end
+
+  create_table "sample_employment_details", force: :cascade do |t|
+    t.bigint "sample_application_form_id"
+    t.string "business_name"
+    t.string "role"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["sample_application_form_id"], name: "index_sample_employment_details_on_sample_application_form_id"
   end
 
   create_table "strata_audit_lines", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -177,5 +185,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_04_221320) do
     t.datetime "updated_at", null: false
   end
 
+  add_foreign_key "sample_employment_details", "sample_application_forms"
   add_foreign_key "strata_tasks", "users", column: "assignee_id", on_delete: :nullify
 end

@@ -4,14 +4,19 @@ module Strata::Flows
   # Represents an individual question page with a set of input fields.
   class QuestionPage
     include Rails.application.routes.url_helpers
-    attr_accessor :name, :fields
+    attr_accessor :name, :fields, :loop
 
-    def initialize(name, if: nil, fields: nil)
+    def initialize(name, if: nil, fields: nil, loop: nil)
       reserved_attributes = { if: }
 
       @name = name
       @if = reserved_attributes[:if]
       @fields = fields || [ @name.to_sym ]
+      @loop = loop
+    end
+
+    def in_loop?
+      @loop.present?
     end
 
     def needed?(record)
@@ -23,19 +28,33 @@ module Strata::Flows
     end
 
     def edit_pathname
-      "edit_#{@name}"
+      in_loop? ? "edit_#{@loop.name}_#{@name}" : "edit_#{@name}"
     end
 
-    def edit_path(record)
-      send("#{edit_pathname}_#{record.class.name.underscore}_path", record)
+    def edit_path(flow_record, loop_record = nil)
+      if in_loop?
+        send(
+          "#{edit_pathname}_#{flow_record.class.name.underscore}_#{@loop.association.to_s.singularize}_path",
+          flow_record, loop_record
+        )
+      else
+        send("#{edit_pathname}_#{flow_record.class.name.underscore}_path", flow_record)
+      end
     end
 
     def update_pathname
-      "update_#{@name}"
+      in_loop? ? "update_#{@loop.name}_#{@name}" : "update_#{@name}"
     end
 
-    def update_path(record)
-      send("#{update_pathname}_#{record.class.name.underscore}_path", record)
+    def update_path(flow_record, loop_record = nil)
+      if in_loop?
+        send(
+          "#{update_pathname}_#{flow_record.class.name.underscore}_#{@loop.association.to_s.singularize}_path",
+          flow_record, loop_record
+        )
+      else
+        send("#{update_pathname}_#{flow_record.class.name.underscore}_path", flow_record)
+      end
     end
 
     # Returns the list of permitted parameter keys for this page's fields,

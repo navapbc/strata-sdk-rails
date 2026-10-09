@@ -51,6 +51,6 @@ class SampleApplicationFormsController < ApplicationController
   end
 
   def set_form
-    @sample_application_form = SampleApplicationForm.find(params[:id])
+    @sample_application_form = SampleApplicationForm.find(flow_record_id)
   end
 end

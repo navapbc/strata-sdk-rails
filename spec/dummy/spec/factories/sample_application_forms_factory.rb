@@ -9,4 +9,10 @@ FactoryBot.define do
       leave_type { "medical" }
     end
   end
+
+  factory :sample_employment_detail do
+    sample_application_form
+    business_name { "Acme Corp" }
+    role { "Engineer" }
+  end
 end

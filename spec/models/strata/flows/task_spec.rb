@@ -61,6 +61,89 @@ RSpec.describe Strata::Flows::Task do
     end
   end
 
+  describe "a task containing a loop" do
+    before do
+      child_class = Class.new do
+        include ActiveModel::Model
+        include ActiveModel::Attributes
+        attribute :business_name, :string
+        attribute :role, :string
+        validates :business_name, presence: true, on: :business_name
+        validates :role, presence: true, on: :role
+      end
+
+      parent_class = Class.new do
+        include ActiveModel::Model
+        attr_accessor :prior_employers, :first_name
+
+        def initialize(prior_employers: [], first_name: nil)
+          @prior_employers = prior_employers
+          @first_name = first_name
+        end
+      end
+
+      stub_const("PriorEmployer", child_class)
+      stub_const("EmploymentForm", parent_class)
+    end
+
+    let(:outer_page) { Strata::Flows::QuestionPage.new(:first_name) }
+    let(:loop_node) do
+      Strata::Flows::Loop.new(
+        :prior_employer,
+        association: :prior_employers,
+        pages: [
+          Strata::Flows::QuestionPage.new(:business_name),
+          Strata::Flows::QuestionPage.new(:role)
+        ]
+      )
+    end
+    let(:task) { described_class.new(:employment, pages: [ outer_page, loop_node ]) }
+
+    it "is started when the outer page is started" do
+      flow_record = EmploymentForm.new(first_name: "Mary", prior_employers: [])
+
+      expect(task).to be_started(flow_record)
+    end
+
+    it "is started when any child record has any completed loop page" do
+      flow_record = EmploymentForm.new(
+        prior_employers: [ PriorEmployer.new(business_name: "Acme") ]
+      )
+
+      expect(task).to be_started(flow_record)
+    end
+
+    it "is completed when the outer page and every child loop page are valid" do
+      flow_record = EmploymentForm.new(
+        first_name: "Mary",
+        prior_employers: [
+          PriorEmployer.new(business_name: "Acme", role: "Engineer"),
+          PriorEmployer.new(business_name: "Globex", role: "Manager")
+        ]
+      )
+
+      expect(task).to be_completed(flow_record)
+    end
+
+    it "is not completed when a child record fails a loop page" do
+      flow_record = EmploymentForm.new(
+        first_name: "Mary",
+        prior_employers: [
+          PriorEmployer.new(business_name: "Acme", role: "Engineer"),
+          PriorEmployer.new(business_name: "Globex")
+        ]
+      )
+
+      expect(task).not_to be_completed(flow_record)
+    end
+
+    it "is completed when the loop relation is empty and the outer page is valid" do
+      flow_record = EmploymentForm.new(first_name: "Mary", prior_employers: [])
+
+      expect(task).to be_completed(flow_record)
+    end
+  end
+
   describe "#dependencies_met?" do
     let(:complete_task) { described_class.new(:personal_info) }
     let(:incomplete_task) { described_class.new(:contact_info) }

@@ -16,6 +16,11 @@ module Strata
       end
     end
 
+    initializer "strata.routing_extensions", before: :set_routes_reloader_hook do
+      require "strata/flows/routing_extensions"
+      ActionDispatch::Routing::Mapper.include(Strata::Flows::RoutingExtensions)
+    end
+
     config.generators do |g|
       g.test_framework :rspec
     end

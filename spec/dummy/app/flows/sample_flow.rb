@@ -12,7 +12,13 @@ class SampleFlow
   task :employment_details, depends_on: [ :personal_information ] do
     question_page :employer_name
   end
-  task :leave_details, depends_on: [ :employment_details ] do
+  task :prior_employment, depends_on: [ :employment_details ] do
+    loop :prior_employer, association: :sample_employment_details do
+      question_page :business_name
+      question_page :role
+    end
+  end
+  task :leave_details, depends_on: [ :prior_employment ] do
     question_page :leave_type
   end
   end_page :review
