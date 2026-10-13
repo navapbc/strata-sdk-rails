@@ -71,6 +71,13 @@ RSpec.describe Strata::Events::Payload do
         expect { described_class.serialize({ form: Strata::Address.new }) }
           .to raise_error(Strata::Events::Payload::InvalidPayloadError, /form/)
       end
+
+      [ Float::NAN, Float::INFINITY, -Float::INFINITY ].each do |value|
+        it "rejects #{value} because JSON stores it as null" do
+          expect { described_class.serialize({ score: value }) }
+            .to raise_error(Strata::Events::Payload::InvalidPayloadError, /score/)
+        end
+      end
     end
 
     context 'when running in production' do
@@ -129,6 +136,19 @@ RSpec.describe Strata::Events::Payload do
       expect { described_class.deserialize(serialized) }.to raise_error(ActiveJob::DeserializationError)
     end
 
+    [ nil, 'x', [ 1 ] ].each do |data|
+      it "raises when the stored data is a #{data.class} instead of a Hash" do
+        expect { described_class.deserialize(data) }.to raise_error(ArgumentError, /must be a Hash/)
+      end
+    end
+
+    it 'leaves a hash with an _aj_globalid key and other keys as plain data, as ActiveJob does' do
+      data = { 'x' => { '_aj_globalid' => "gid://#{GlobalID.app}/NoSuchClass/1", 'other' => 1 } }
+
+      expect(described_class.deserialize(data))
+        .to eq({ 'x' => { '_aj_globalid' => "gid://#{GlobalID.app}/NoSuchClass/1", 'other' => 1 } })
+    end
+
     context 'when the stored payload has been tampered with' do
       it 'rejects a serializer that is not registered with ActiveJob' do
         not_a_serializer = Class.new { def self.deserialize(_hash) = :pwned }
@@ -163,6 +183,39 @@ RSpec.describe Strata::Events::Payload do
 
         expect { described_class.deserialize({ 'x' => { '_aj_globalid' => gid } }) }
           .to raise_error(Strata::Events::Payload::UnsafePayloadError, /NoSuchClass/)
+      end
+
+      [
+        [ 'ActiveJob::Serializers::ModuleSerializer', 'Kernel' ],
+        [ 'ActiveJob::Serializers::RangeSerializer', nil ],
+        [ 'ActiveJob::Serializers::DurationSerializer', nil ]
+      ].each do |serializer, value|
+        it "rejects #{serializer.demodulize}, which serialize never produces" do
+          data = { 'x' => { '_aj_serialized' => serializer, 'value' => value } }
+
+          expect { described_class.deserialize(data) }
+            .to raise_error(Strata::Events::Payload::UnsafePayloadError, /#{serializer.demodulize}/)
+        end
+      end
+
+      it 'rejects a GlobalID from another app' do
+        kase = TestCase.create!
+        gid = "gid://other-app/TestCase/#{kase.id}"
+
+        expect { described_class.deserialize({ 'x' => { '_aj_globalid' => gid } }) }
+          .to raise_error(Strata::Events::Payload::UnsafePayloadError, /other-app/)
+      end
+
+      it 'rejects a GlobalID for an abstract model' do
+        gid = "gid://#{GlobalID.app}/ApplicationRecord/1"
+
+        expect { described_class.deserialize({ 'x' => { '_aj_globalid' => gid } }) }
+          .to raise_error(Strata::Events::Payload::UnsafePayloadError, /ApplicationRecord/)
+      end
+
+      it 'rejects a GlobalID whose value is not a string' do
+        expect { described_class.deserialize({ 'x' => { '_aj_globalid' => { 'a' => 1 } } }) }
+          .to raise_error(Strata::Events::Payload::UnsafePayloadError, /GlobalID/)
       end
     end
   end

@@ -147,11 +147,12 @@ Rules:
 
 > **Implemented**: `Strata::Events::Payload.serialize` and `.deserialize`,
 > not yet called by `publish`. Development and test allow `nil`, booleans,
-> strings, symbols, numbers, `BigDecimal`, dates, times, saved ActiveRecord
-> records, and hashes and arrays of those. Because ActiveJob does not check
-> stored serializer names against its registered serializers, `deserialize`
-> rejects an unregistered `_aj_serialized` name and a GlobalID that does not
-> name an ActiveRecord model before handing the data to ActiveJob.
+> strings, symbols, finite numbers, `BigDecimal`, dates, times, saved
+> ActiveRecord records, and hashes and arrays of those. Because ActiveJob does
+> not check stored serializer names against its registered serializers,
+> `deserialize` checks stored data before handing it to ActiveJob: it accepts
+> only the serializers those values produce, and only GlobalIDs for this app
+> that name a concrete ActiveRecord model.
 
 ## Delivery guarantees
 

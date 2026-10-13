@@ -31,6 +31,16 @@ module Strata
         Date, Time, ActiveSupport::TimeWithZone
       ].freeze
 
+      # The ActiveJob serializers that ALLOWED_SCALARS can produce.
+      ALLOWED_SERIALIZERS = %w[
+        ActiveJob::Serializers::SymbolSerializer
+        ActiveJob::Serializers::BigDecimalSerializer
+        ActiveJob::Serializers::DateSerializer
+        ActiveJob::Serializers::DateTimeSerializer
+        ActiveJob::Serializers::TimeSerializer
+        ActiveJob::Serializers::TimeWithZoneSerializer
+      ].to_set.freeze
+
       class << self
         # @param [Hash] payload The event payload
         # @return [Hash] A JSON-compatible hash
@@ -45,9 +55,11 @@ module Strata
 
         # @param [Hash] data A hash returned by serialize, possibly after a JSON round trip
         # @return [Hash] The payload, with records loaded in their current state
-        # @raise [UnsafePayloadError] if the data names an unregistered serializer or a non-ActiveRecord GlobalID
+        # @raise [UnsafePayloadError] if the data names a serializer or GlobalID that serialize could not produce
         # @raise [ActiveJob::DeserializationError] if a referenced record no longer exists
         def deserialize(data)
+          raise ArgumentError, "Event payload must be a Hash, got #{data.class}" unless data.is_a?(Hash)
+
           ensure_safe!(data)
           ActiveJob::Arguments.deserialize([ data ]).first
         end
@@ -62,6 +74,8 @@ module Strata
             value.each_with_index { |nested, index| validate_identifiers!(nested, [ *path, index ]) }
           when ActiveRecord::Base
             raise InvalidPayloadError, "Event payload record at #{path.join('.')} must be saved" unless value.persisted?
+          when Float
+            raise InvalidPayloadError, "Event payload value at #{path.join('.')} must be finite" unless value.finite?
           when *ALLOWED_SCALARS
             nil
           else
@@ -74,24 +88,27 @@ module Strata
         def ensure_safe!(value)
           case value
           when Hash
-            ensure_registered_serializer!(value["_aj_serialized"]) if value.key?("_aj_serialized")
-            ensure_active_record_global_id!(value["_aj_globalid"]) if value.key?("_aj_globalid")
+            ensure_allowed_serializer!(value["_aj_serialized"]) if value.key?("_aj_serialized")
+            # ActiveJob only treats a hash as a GlobalID when that is its sole key.
+            ensure_active_record_global_id!(value["_aj_globalid"]) if value.size == 1 && value.key?("_aj_globalid")
             value.each_value { |nested| ensure_safe!(nested) }
           when Array
             value.each { |nested| ensure_safe!(nested) }
           end
         end
 
-        # ActiveJob constantizes the stored serializer name without checking that it is registered.
-        def ensure_registered_serializer!(name)
-          return if ActiveJob::Serializers.serializers.any? { |serializer| serializer.name == name }
+        # ActiveJob constantizes the stored serializer name without checking that it is registered,
+        # and some registered serializers (such as ModuleSerializer) constantize stored values.
+        def ensure_allowed_serializer!(name)
+          return if ALLOWED_SERIALIZERS.include?(name)
 
-          raise UnsafePayloadError, "Event payload names unregistered serializer #{name.inspect}"
+          raise UnsafePayloadError, "Event payload names disallowed serializer #{name.inspect}"
         end
 
         def ensure_active_record_global_id!(gid)
-          model_class = GlobalID.parse(gid)&.model_name&.safe_constantize
-          return if model_class.is_a?(Class) && model_class < ActiveRecord::Base
+          parsed = GlobalID.parse(gid) if gid.is_a?(String)
+          model_class = parsed&.model_name&.safe_constantize if parsed&.app == GlobalID.app
+          return if model_class.is_a?(Class) && model_class < ActiveRecord::Base && !model_class.abstract_class?
 
           raise UnsafePayloadError, "Event payload GlobalID #{gid.inspect} is not an ActiveRecord model"
         end
