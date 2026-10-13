@@ -287,8 +287,9 @@ includes at least the event name, subscriber key, case type, case ID, and
 > strata.business_process.outcome event=<name> subscriber=<Process>.handle_event case_type=<Case> case_id=<id> outcome=<transitioned|no_match>
 > ```
 >
-> Until step exceptions stop being swallowed, a step that raises after the case
-> is saved still reports and logs `:transitioned`.
+> A step that raises now rolls back its case step and propagates instead of
+> reporting `:transitioned`. Outcome lines are written as each case is handled,
+> so a line can describe a case whose change a later failure rolled back.
 
 ## Configuration
 
@@ -347,6 +348,26 @@ Exception propagation must not land by itself while handlers still run inside
 the publisher's transaction. Until durable jobs exist, a publish-boundary
 rescue keeps the form or task saved while rolling back the failed case step.
 
+> **Implemented** (fixes 1 and 4, plus the rescue):
+>
+> - Each step is saved and run in one transaction. If the step raises, the case
+>   stays on its previous step and the error propagates. This includes the
+>   `end` step, which now uses `close!`.
+> - A start event creates the case and runs its first step together, so a
+>   failed first step leaves no case behind.
+> - `EventManager` runs each subscriber in a savepoint. If it raises, its
+>   changes roll back, and the error is logged and sent to `Rails.error`. The
+>   publisher's own write is kept.
+> - A subscriber's changes roll back as a whole. If an event matches several
+>   cases and one fails, none of them move. Until Phase 3 adds retries, they
+>   stay put until the event is published again.
+> - Every publish catches its own subscribers' errors, including publishes made
+>   by a system process step. That step still commits if a handler it
+>   triggered fails.
+> - The `strata:events` publish rake tasks exit 0 even if a subscriber fails.
+>   Their log message says failures go to `Rails.error` instead of claiming
+>   success.
+
 ## Delivery plan
 
 | Phase | Guarantees introduced |
@@ -389,8 +410,8 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 | Slice | Phase | Status |
 | --- | --- | --- |
 | Handler outcome contract: transitions return `:transitioned` or `:no_match` | 1 | Done |
-| Per-case structured outcome log | 1 | In review |
-| Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | Not started |
+| Per-case structured outcome log | 1 | Done |
+| Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | In review |
 | Event and delivery persistence | 2 | Not started |
 | Durable ActiveJob delivery | 3 | Not started |
 
@@ -573,6 +594,18 @@ Resolved:
    and then returns to the same named step. The migration generator must cover
    new case tables, and existing hosts must add the field before enabling
    durability.
+
+Remaining risks:
+
+1. **The design assumes one current step per case.** A case stores a single
+   `business_process_current_step`, and the transition version, conditional
+   updates, and per-subscriber delivery all build on that. Parallel steps
+   within one case would need the current step and transition version tracked
+   per branch, and deliveries that fan out per branch so each branch retries
+   and completes on its own; otherwise branches of one case would contend on
+   the case-level version and a failed branch would roll back the others.
+   Decide whether parallel steps are planned before Phase 2 creates the
+   delivery tables.
 
 ## Explicitly out of scope
 
