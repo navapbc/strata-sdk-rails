@@ -126,39 +126,36 @@ unrelated case updates.
 
 ## Payload contract
 
-Payloads use `ActiveJob::Arguments.serialize` and `deserialize` rather than raw
-JSON. This preserves symbol keys and converts ActiveRecord objects to GlobalID
-references.
+Payloads are stored as plain JSON. `Strata::Events::Payload.serialize`
+validates a payload and converts it to a hash with string keys;
+`deserialize` returns the stored hash with symbol keys at every level.
+Deserializing never loads a class or record named in stored data, so a
+tampered payload row cannot make a worker load arbitrary code.
 
 Rules:
 
-- Payloads contain identifiers, not record attributes or PII.
-- Every environment validates that values are scalars, timestamps, saved
-  ActiveRecord records, or collections of those values. Production runs the
-  same check because delivery refuses anything else: a payload that skipped
-  it would be stored but could never be delivered, so it is better to fail
-  loudly at publish. Like an unserializable payload, this can reject the
-  originating domain write.
-- A payload ActiveJob cannot serialize is a programming error. Publishing
-  raises before writing an event row. Because publishing happens in model
-  callbacks, this can reject the originating domain write.
-- Replaying a GlobalID reads the record's current state, not a historical
-  snapshot.
-- A GlobalID for a deleted record is terminal: the delivery becomes `dead`
-  without retry.
+- Payloads contain identifiers, not records, record attributes, or PII.
+- Allowed values are strings, integers, finite floats, booleans, `nil`,
+  times, dates, and hashes and arrays of those. Keys are strings or symbols.
+- Times and dates are stored as ISO 8601 strings (times with microseconds)
+  and come back as strings. Handlers parse them when needed.
+- Every other value is rejected, including symbols (which would come back as
+  strings), `BigDecimal`, records, NaN and Infinity, strings that are not
+  valid UTF-8 or contain NUL bytes, and hashes whose keys would collide once
+  stringified. The error names the path to the bad value.
+- String keys come back as symbols, so `{ "case_id" => id }` is read as
+  `{ case_id: id }`.
+- Every environment runs the same check, because a payload that cannot be
+  stored and returned unchanged would otherwise be stored but never
+  delivered correctly. Publishing raises before writing an event row. Because
+  publishing happens in model callbacks, this can reject the originating
+  domain write.
+- A payload that refers to a deleted record still deserializes; the handler
+  decides what a missing record means, such as a `no_match` when no case is
+  found.
 
 > **Implemented**: `Strata::Events::Payload.serialize` and `.deserialize`,
-> not yet called by `publish`. Payloads may contain `nil`, booleans, strings,
-> symbols, finite numbers, `BigDecimal`, dates, times, saved ActiveRecord
-> records, and hashes and arrays of those, with string or symbol keys that do
-> not start with `_aj_`. Because ActiveJob does not check stored serializer
-> names against its registered serializers, `deserialize` checks stored data
-> before handing it to ActiveJob: it accepts only the serializers those values
-> produce, and only GlobalIDs for this app that name a concrete ActiveRecord
-> model. Renaming the host application (`GlobalID.app`) therefore makes
-> stored record references undeliverable. `deserialize` raises
-> `ActiveJob::DeserializationError` only for a missing record; any other
-> failure while loading a record is re-raised unwrapped so it can be retried.
+> not yet called by `publish`.
 
 ## Delivery guarantees
 
@@ -535,16 +532,18 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 
 ### Payload compatibility is preserved
 
-- **Given** a payload contains symbol keys, nested supported values, and a
-  GlobalID-capable record
+- **Given** a payload contains symbol keys, identifiers, a timestamp, and
+  nested supported values
 - **When** it is serialized and deserialized
-- **Then** symbol access still works and the record reference resolves.
+- **Then** symbol access still works, identifiers are unchanged, and the
+  timestamp is an ISO 8601 string for the same instant.
 
-### Deleted GlobalID does not retry forever
+### Stored payloads never load code
 
-- **Given** a payload references a record that was deleted before delivery
+- **Given** a stored payload row contains a class name or a GlobalID string
 - **When** the job deserializes it
-- **Then** the delivery becomes `dead` without another retry.
+- **Then** the value comes back as a plain string and no class or record is
+  loaded.
 
 ### Pruning removes complete event history safely
 
@@ -575,7 +574,7 @@ Resolved:
    `Strata::Events.retention_period` defaults to `nil`, and each host must set
    it according to its own policy before enabling pruning.
 2. **Database encryption at rest is the SDK baseline.** Payloads are limited
-   to identifiers, GlobalID references, and timestamps. Application-level
+   to identifiers, timestamps, and other plain JSON values. Application-level
    payload encryption is optional and remains a host responsibility when its
    policy requires stronger protection.
 3. **Durability uses a two-release rollout.**

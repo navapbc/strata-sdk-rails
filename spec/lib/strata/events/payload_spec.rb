@@ -3,66 +3,81 @@
 require 'rails_helper'
 
 RSpec.describe Strata::Events::Payload do
+  # Mirrors storing the serialized hash in a jsonb column and reading it back.
   def round_trip(payload)
     described_class.deserialize(JSON.parse(described_class.serialize(payload).to_json))
   end
 
   describe '.serialize' do
-    it 'returns a JSON-compatible hash' do
-      serialized = described_class.serialize({ case_id: 'abc' })
+    it 'returns a hash with string keys that JSON stores unchanged' do
+      serialized = described_class.serialize({ case_id: 'abc', nested: { task_id: 'def' } })
 
+      expect(serialized).to eq({ 'case_id' => 'abc', 'nested' => { 'task_id' => 'def' } })
       expect(JSON.parse(serialized.to_json)).to eq(serialized)
-    end
-
-    it 'stores a record as a GlobalID reference instead of its attributes' do
-      kase = TestCase.create!(business_process_current_step: 'secret_step')
-
-      serialized = described_class.serialize({ kase: kase })
-
-      expect(serialized['kase']).to eq('_aj_globalid' => kase.to_global_id.to_s)
-      expect(serialized.to_json).not_to include('secret_step')
     end
 
     it 'raises when the payload is not a hash' do
       expect { described_class.serialize([ 1, 2 ]) }.to raise_error(ArgumentError, /must be a Hash/)
     end
 
-    context 'with the identifier-only check' do
-      [
-        nil, true, false, 'text', :symbol, 42, 1.5, BigDecimal('9.99'),
-        Date.new(2026, 10, 13), Time.utc(2026, 10, 13), DateTime.new(2026, 10, 13),
-        Time.zone.parse('2026-10-13 10:30')
-      ].each do |value|
-        it "allows #{value.class} values" do
-          expect { described_class.serialize({ value: value }) }.not_to raise_error
+    describe 'allowed values' do
+      [ nil, true, false, 'text', 42, 1.5 ].each do |value|
+        it "allows #{value.inspect}" do
+          expect(described_class.serialize({ value: value })).to eq({ 'value' => value })
         end
       end
 
-      it 'allows persisted records' do
+      it 'allows nested hashes and arrays of allowed values' do
+        payload = { ids: [ 'a', 'b' ], meta: { 'count' => 2, flags: [ true, { 'x' => nil } ] } }
+
+        expect(described_class.serialize(payload))
+          .to eq({ 'ids' => [ 'a', 'b' ], 'meta' => { 'count' => 2, 'flags' => [ true, { 'x' => nil } ] } })
+      end
+
+      it 'stores times as ISO 8601 strings with microseconds' do
+        submitted_at = Time.zone.parse('2026-10-13 10:30:00.123456')
+
+        expect(described_class.serialize({ submitted_at: submitted_at }))
+          .to eq({ 'submitted_at' => '2026-10-13T10:30:00.123456Z' })
+      end
+
+      it 'stores Time and DateTime values as ISO 8601 strings' do
+        expect(described_class.serialize({ a: Time.utc(2026, 10, 13, 1, 2, 3), b: DateTime.new(2026, 10, 13, 1, 2, 3) }))
+          .to eq({ 'a' => '2026-10-13T01:02:03.000000Z', 'b' => '2026-10-13T01:02:03.000000+00:00' })
+      end
+
+      it 'stores dates as ISO 8601 date strings' do
+        expect(described_class.serialize({ on: Date.new(2026, 10, 13) })).to eq({ 'on' => '2026-10-13' })
+      end
+
+      it 'allows binary strings that are plain ASCII' do
+        expect(described_class.serialize({ code: 'abc'.b })).to eq({ 'code' => 'abc' })
+      end
+    end
+
+    describe 'rejected values' do
+      {
+        'a symbol, which would come back as a string' => :approved,
+        'a BigDecimal, which JSON cannot store exactly' => BigDecimal('9.99'),
+        'a Range' => (1..2),
+        'an arbitrary object' => Object.new
+      }.each do |description, value|
+        it "rejects #{description} and names its path" do
+          expect { described_class.serialize({ meta: { value: value } }) }
+            .to raise_error(Strata::Events::Payload::InvalidPayloadError, /meta\.value.*#{value.class}/)
+        end
+      end
+
+      it 'rejects records and asks for an identifier instead' do
         kase = TestCase.create!
 
-        expect { described_class.serialize({ kase: kase }) }.not_to raise_error
+        expect { described_class.serialize({ kase: kase }) }
+          .to raise_error(Strata::Events::Payload::InvalidPayloadError, /kase.*TestCase.*id/)
       end
 
-      it 'allows nested hashes and arrays of allowed values' do
-        payload = { ids: [ 'a', 'b' ], meta: { 'count' => 2, at: [ Date.new(2026, 1, 1) ] } }
-
-        expect { described_class.serialize(payload) }.not_to raise_error
-      end
-
-      it 'rejects unsupported values and names their path' do
-        expect { described_class.serialize({ meta: { range: (1..2) } }) }
-          .to raise_error(Strata::Events::Payload::InvalidPayloadError, /meta\.range.*Range/)
-      end
-
-      it 'rejects unsaved records because they have no identifier' do
-        expect { described_class.serialize({ kase: TestCase.new }) }
-          .to raise_error(Strata::Events::Payload::InvalidPayloadError, /kase/)
-      end
-
-      it 'rejects records that are not ActiveRecord models' do
-        expect { described_class.serialize({ form: Strata::Address.new }) }
-          .to raise_error(Strata::Events::Payload::InvalidPayloadError, /form/)
+      it 'names array indexes in the path' do
+        expect { described_class.serialize({ items: [ 'a', :b ] }) }
+          .to raise_error(Strata::Events::Payload::InvalidPayloadError, /items\.1/)
       end
 
       [ Float::NAN, Float::INFINITY, -Float::INFINITY ].each do |value|
@@ -72,176 +87,68 @@ RSpec.describe Strata::Events::Payload do
         end
       end
 
-      it 'rejects hash keys that are not strings or symbols and names their path' do
+      {
+        'a NUL byte' => "a\u0000b",
+        'invalid UTF-8' => "a\xFFb",
+        'non-ASCII binary data' => "\xFF".b
+      }.each do |description, text|
+        it "rejects a string containing #{description}, which JSON or Postgres cannot store" do
+          expect { described_class.serialize({ note: text }) }
+            .to raise_error(Strata::Events::Payload::InvalidPayloadError, /note/)
+        end
+      end
+    end
+
+    describe 'keys' do
+      it 'rejects keys that are not strings or symbols and names their path' do
         expect { described_class.serialize({ counts: { 1 => 'a' } }) }
           .to raise_error(Strata::Events::Payload::InvalidPayloadError, /counts.*Integer/)
       end
 
-      it 'rejects hash keys ActiveJob reserves and names their path' do
-        expect { described_class.serialize({ meta: { '_aj_globalid' => 'x' } }) }
-          .to raise_error(Strata::Events::Payload::InvalidPayloadError, /meta.*_aj_globalid/)
+      it 'rejects a hash with both the symbol and string form of a key, which would collide' do
+        expect { described_class.serialize({ meta: { case_id: 'a', 'case_id' => 'b' } }) }
+          .to raise_error(Strata::Events::Payload::InvalidPayloadError, /meta.*case_id/)
       end
-    end
 
-    context 'when running in production' do
-      before { allow(Rails.env).to receive(:local?).and_return(false) }
-
-      it 'still rejects values deserialize would refuse, so no event is stored that can never be delivered' do
-        expect { described_class.serialize({ range: (1..2) }) }
-          .to raise_error(Strata::Events::Payload::InvalidPayloadError, /range/)
+      it 'rejects a key containing a NUL byte' do
+        expect { described_class.serialize({ meta: { "a\u0000" => 1 } }) }
+          .to raise_error(Strata::Events::Payload::InvalidPayloadError, /meta/)
       end
     end
   end
 
   describe '.deserialize' do
-    it 'preserves symbol keys' do
-      expect(round_trip({ case_id: 'abc', nested: { task_id: 'def' } }))
-        .to eq({ case_id: 'abc', nested: { task_id: 'def' } })
+    it 'returns symbol keys at every level, including hashes inside arrays' do
+      expect(round_trip({ 'case_id' => 'abc', nested: { task_id: 'def' }, list: [ { 'id' => 1 } ] }))
+        .to eq({ case_id: 'abc', nested: { task_id: 'def' }, list: [ { id: 1 } ] })
     end
 
-    it 'preserves string keys' do
-      expect(round_trip({ 'case_id' => 'abc' })).to eq({ 'case_id' => 'abc' })
+    it 'preserves strings, numbers, booleans, and nil' do
+      payload = { s: 'text', i: 42, f: 1.5, t: true, n: nil }
+
+      expect(round_trip(payload)).to eq(payload)
     end
 
-    it 'preserves indifferent access hashes' do
-      result = round_trip(ActiveSupport::HashWithIndifferentAccess.new(case_id: 'abc'))
-
-      expect(result).to be_a(ActiveSupport::HashWithIndifferentAccess)
-      expect(result[:case_id]).to eq('abc')
-    end
-
-    it 'preserves time zone and sub-second precision' do
+    it 'returns times as ISO 8601 strings that parse back to the same instant' do
       submitted_at = Time.zone.parse('2026-10-13 10:30:00.123456')
 
       result = round_trip({ submitted_at: submitted_at })
 
-      expect(result[:submitted_at]).to be_a(ActiveSupport::TimeWithZone)
-      expect(result[:submitted_at]).to eq(submitted_at)
+      expect(result[:submitted_at]).to eq('2026-10-13T10:30:00.123456Z')
+      expect(Time.zone.parse(result[:submitted_at])).to eq(submitted_at)
     end
 
-    it 'preserves dates and decimals' do
-      expect(round_trip({ on: Date.new(2026, 10, 13), amount: BigDecimal('9.99') }))
-        .to eq({ on: Date.new(2026, 10, 13), amount: BigDecimal('9.99') })
-    end
-
-    it "loads a record's current state rather than a snapshot" do
-      kase = TestCase.create!(business_process_current_step: 'first')
-      serialized = described_class.serialize({ kase: kase })
-      kase.update!(business_process_current_step: 'second')
-
-      expect(described_class.deserialize(serialized)[:kase].business_process_current_step).to eq('second')
-    end
-
-    it 'raises ActiveJob::DeserializationError when a referenced record was deleted' do
+    it 'returns stored data as plain values without loading classes or records' do
       kase = TestCase.create!
-      serialized = described_class.serialize({ kase: kase })
-      kase.destroy!
+      data = { 'x' => { '_aj_globalid' => kase.to_global_id.to_s }, 'y' => { '_aj_serialized' => 'Kernel' } }
 
-      expect { described_class.deserialize(serialized) }.to raise_error(ActiveJob::DeserializationError)
-    end
-
-    it 'raises the original error, not DeserializationError, when loading a record fails for another reason' do
-      kase = TestCase.create!
-      serialized = described_class.serialize({ kase: kase })
-      allow(TestCase).to receive(:find).and_raise(ActiveRecord::ConnectionNotEstablished)
-
-      expect { described_class.deserialize(serialized) }.to raise_error(ActiveRecord::ConnectionNotEstablished)
+      expect(described_class.deserialize(data))
+        .to eq({ x: { _aj_globalid: kase.to_global_id.to_s }, y: { _aj_serialized: 'Kernel' } })
     end
 
     [ nil, 'x', [ 1 ] ].each do |data|
       it "raises when the stored data is a #{data.class} instead of a Hash" do
         expect { described_class.deserialize(data) }.to raise_error(ArgumentError, /must be a Hash/)
-      end
-    end
-
-    it 'leaves a hash with an _aj_globalid key and other keys as plain data, as ActiveJob does' do
-      data = { 'x' => { '_aj_globalid' => "gid://#{GlobalID.app}/NoSuchClass/1", 'other' => 1 } }
-
-      expect(described_class.deserialize(data))
-        .to eq({ 'x' => { '_aj_globalid' => "gid://#{GlobalID.app}/NoSuchClass/1", 'other' => 1 } })
-    end
-
-    context 'when the stored payload has been tampered with' do
-      it 'rejects a serializer that is not registered with ActiveJob' do
-        not_a_serializer = Class.new { def self.deserialize(_hash) = :pwned }
-        stub_const('NotASerializer', not_a_serializer)
-        allow(not_a_serializer).to receive(:deserialize).and_call_original
-
-        expect { described_class.deserialize({ 'x' => { '_aj_serialized' => 'NotASerializer' } }) }
-          .to raise_error(Strata::Events::Payload::UnsafePayloadError, /NotASerializer/)
-        expect(not_a_serializer).not_to have_received(:deserialize)
-      end
-
-      it 'rejects an unregistered serializer nested inside an array' do
-        payload = { 'x' => [ { 'y' => { '_aj_serialized' => 'Kernel' } } ] }
-
-        expect { described_class.deserialize(payload) }
-          .to raise_error(Strata::Events::Payload::UnsafePayloadError, /Kernel/)
-      end
-
-      it 'rejects a GlobalID that does not point to an ActiveRecord model' do
-        not_a_model = Class.new { def self.find(_id) = :pwned }
-        stub_const('NotAModel', not_a_model)
-        allow(not_a_model).to receive(:find).and_call_original
-        gid = "gid://#{GlobalID.app}/NotAModel/1"
-
-        expect { described_class.deserialize({ 'x' => { '_aj_globalid' => gid } }) }
-          .to raise_error(Strata::Events::Payload::UnsafePayloadError, /NotAModel/)
-        expect(not_a_model).not_to have_received(:find)
-      end
-
-      it 'rejects a GlobalID for an unknown class' do
-        gid = "gid://#{GlobalID.app}/NoSuchClass/1"
-
-        expect { described_class.deserialize({ 'x' => { '_aj_globalid' => gid } }) }
-          .to raise_error(Strata::Events::Payload::UnsafePayloadError, /NoSuchClass/)
-      end
-
-      [
-        [ 'ActiveJob::Serializers::ModuleSerializer', 'Kernel' ],
-        [ 'ActiveJob::Serializers::RangeSerializer', nil ],
-        [ 'ActiveJob::Serializers::DurationSerializer', nil ]
-      ].each do |serializer, value|
-        it "rejects #{serializer.demodulize}, which serialize never produces" do
-          data = { 'x' => { '_aj_serialized' => serializer, 'value' => value } }
-
-          expect { described_class.deserialize(data) }
-            .to raise_error(Strata::Events::Payload::UnsafePayloadError, /#{serializer.demodulize}/)
-        end
-      end
-
-      it 'rejects a GlobalID from another app' do
-        kase = TestCase.create!
-        gid = "gid://other-app/TestCase/#{kase.id}"
-
-        expect { described_class.deserialize({ 'x' => { '_aj_globalid' => gid } }) }
-          .to raise_error(Strata::Events::Payload::UnsafePayloadError, /other-app/)
-      end
-
-      it 'rejects a GlobalID for an abstract model' do
-        gid = "gid://#{GlobalID.app}/ApplicationRecord/1"
-
-        expect { described_class.deserialize({ 'x' => { '_aj_globalid' => gid } }) }
-          .to raise_error(Strata::Events::Payload::UnsafePayloadError, /ApplicationRecord/)
-      end
-
-      it 'rejects a top-level GlobalID, which would deserialize to a record instead of a Hash' do
-        kase = TestCase.create!
-
-        expect { described_class.deserialize({ '_aj_globalid' => kase.to_global_id.to_s }) }
-          .to raise_error(Strata::Events::Payload::UnsafePayloadError, /top level/)
-      end
-
-      it 'rejects a top-level serialized value, which would deserialize to a scalar instead of a Hash' do
-        data = { '_aj_serialized' => 'ActiveJob::Serializers::SymbolSerializer', 'value' => 'x' }
-
-        expect { described_class.deserialize(data) }
-          .to raise_error(Strata::Events::Payload::UnsafePayloadError, /top level/)
-      end
-
-      it 'rejects a GlobalID whose value is not a string' do
-        expect { described_class.deserialize({ 'x' => { '_aj_globalid' => { 'a' => 1 } } }) }
-          .to raise_error(Strata::Events::Payload::UnsafePayloadError, /GlobalID/)
       end
     end
   end
