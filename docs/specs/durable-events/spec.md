@@ -145,6 +145,14 @@ Rules:
 - A GlobalID for a deleted record is terminal: the delivery becomes `dead`
   without retry.
 
+> **Implemented**: `Strata::Events::Payload.serialize` and `.deserialize`,
+> not yet called by `publish`. Development and test allow `nil`, booleans,
+> strings, symbols, numbers, `BigDecimal`, dates, times, saved ActiveRecord
+> records, and hashes and arrays of those. Because ActiveJob does not check
+> stored serializer names against its registered serializers, `deserialize`
+> rejects an unregistered `_aj_serialized` name and a GlobalID that does not
+> name an ActiveRecord model before handing the data to ActiveJob.
+
 ## Delivery guarantees
 
 ### At least once, not exactly once
@@ -411,7 +419,8 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 | --- | --- | --- |
 | Handler outcome contract: transitions return `:transitioned` or `:no_match` | 1 | Done |
 | Per-case structured outcome log | 1 | Done |
-| Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | In review |
+| Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | Done |
+| Payload serialization (`Strata::Events::Payload`) | 2 | In review |
 | Event and delivery persistence | 2 | Not started |
 | Durable ActiveJob delivery | 3 | Not started |
 
