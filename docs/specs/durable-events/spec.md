@@ -133,10 +133,12 @@ references.
 Rules:
 
 - Payloads contain identifiers, not record attributes or PII.
-- Development and test validate that values are scalars, GlobalID-capable
-  records, or collections of those values.
-- Production does not run the identifier-only validation, so it cannot reject
-  a person's submission for that policy check.
+- Every environment validates that values are scalars, timestamps, saved
+  ActiveRecord records, or collections of those values. Production runs the
+  same check because delivery refuses anything else: a payload that skipped
+  it would be stored but could never be delivered, so it is better to fail
+  loudly at publish. Like an unserializable payload, this can reject the
+  originating domain write.
 - A payload ActiveJob cannot serialize is a programming error. Publishing
   raises before writing an event row. Because publishing happens in model
   callbacks, this can reject the originating domain write.
@@ -146,13 +148,17 @@ Rules:
   without retry.
 
 > **Implemented**: `Strata::Events::Payload.serialize` and `.deserialize`,
-> not yet called by `publish`. Development and test allow `nil`, booleans,
-> strings, symbols, finite numbers, `BigDecimal`, dates, times, saved
-> ActiveRecord records, and hashes and arrays of those. Because ActiveJob does
-> not check stored serializer names against its registered serializers,
-> `deserialize` checks stored data before handing it to ActiveJob: it accepts
-> only the serializers those values produce, and only GlobalIDs for this app
-> that name a concrete ActiveRecord model.
+> not yet called by `publish`. Payloads may contain `nil`, booleans, strings,
+> symbols, finite numbers, `BigDecimal`, dates, times, saved ActiveRecord
+> records, and hashes and arrays of those, with string or symbol keys that do
+> not start with `_aj_`. Because ActiveJob does not check stored serializer
+> names against its registered serializers, `deserialize` checks stored data
+> before handing it to ActiveJob: it accepts only the serializers those values
+> produce, and only GlobalIDs for this app that name a concrete ActiveRecord
+> model. Renaming the host application (`GlobalID.app`) therefore makes
+> stored record references undeliverable. `deserialize` raises
+> `ActiveJob::DeserializationError` only for a missing record; any other
+> failure while loading a record is re-raised unwrapped so it can be retried.
 
 ## Delivery guarantees
 

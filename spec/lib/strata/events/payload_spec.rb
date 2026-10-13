@@ -23,18 +23,11 @@ RSpec.describe Strata::Events::Payload do
       expect(serialized.to_json).not_to include('secret_step')
     end
 
-    it 'raises when ActiveJob cannot serialize a value' do
-      allow(Rails.env).to receive(:local?).and_return(false)
-
-      expect { described_class.serialize({ handler: Object.new }) }
-        .to raise_error(ActiveJob::SerializationError)
-    end
-
     it 'raises when the payload is not a hash' do
       expect { described_class.serialize([ 1, 2 ]) }.to raise_error(ArgumentError, /must be a Hash/)
     end
 
-    context 'when running in development or test' do
+    context 'with the identifier-only check' do
       [
         nil, true, false, 'text', :symbol, 42, 1.5, BigDecimal('9.99'),
         Date.new(2026, 10, 13), Time.utc(2026, 10, 13), DateTime.new(2026, 10, 13),
@@ -78,13 +71,24 @@ RSpec.describe Strata::Events::Payload do
             .to raise_error(Strata::Events::Payload::InvalidPayloadError, /score/)
         end
       end
+
+      it 'rejects hash keys that are not strings or symbols and names their path' do
+        expect { described_class.serialize({ counts: { 1 => 'a' } }) }
+          .to raise_error(Strata::Events::Payload::InvalidPayloadError, /counts.*Integer/)
+      end
+
+      it 'rejects hash keys ActiveJob reserves and names their path' do
+        expect { described_class.serialize({ meta: { '_aj_globalid' => 'x' } }) }
+          .to raise_error(Strata::Events::Payload::InvalidPayloadError, /meta.*_aj_globalid/)
+      end
     end
 
     context 'when running in production' do
       before { allow(Rails.env).to receive(:local?).and_return(false) }
 
-      it 'skips the identifier-only check so it cannot reject a submission' do
-        expect { described_class.serialize({ range: (1..2) }) }.not_to raise_error
+      it 'still rejects values deserialize would refuse, so no event is stored that can never be delivered' do
+        expect { described_class.serialize({ range: (1..2) }) }
+          .to raise_error(Strata::Events::Payload::InvalidPayloadError, /range/)
       end
     end
   end
@@ -134,6 +138,14 @@ RSpec.describe Strata::Events::Payload do
       kase.destroy!
 
       expect { described_class.deserialize(serialized) }.to raise_error(ActiveJob::DeserializationError)
+    end
+
+    it 'raises the original error, not DeserializationError, when loading a record fails for another reason' do
+      kase = TestCase.create!
+      serialized = described_class.serialize({ kase: kase })
+      allow(TestCase).to receive(:find).and_raise(ActiveRecord::ConnectionNotEstablished)
+
+      expect { described_class.deserialize(serialized) }.to raise_error(ActiveRecord::ConnectionNotEstablished)
     end
 
     [ nil, 'x', [ 1 ] ].each do |data|
@@ -211,6 +223,20 @@ RSpec.describe Strata::Events::Payload do
 
         expect { described_class.deserialize({ 'x' => { '_aj_globalid' => gid } }) }
           .to raise_error(Strata::Events::Payload::UnsafePayloadError, /ApplicationRecord/)
+      end
+
+      it 'rejects a top-level GlobalID, which would deserialize to a record instead of a Hash' do
+        kase = TestCase.create!
+
+        expect { described_class.deserialize({ '_aj_globalid' => kase.to_global_id.to_s }) }
+          .to raise_error(Strata::Events::Payload::UnsafePayloadError, /top level/)
+      end
+
+      it 'rejects a top-level serialized value, which would deserialize to a scalar instead of a Hash' do
+        data = { '_aj_serialized' => 'ActiveJob::Serializers::SymbolSerializer', 'value' => 'x' }
+
+        expect { described_class.deserialize(data) }
+          .to raise_error(Strata::Events::Payload::UnsafePayloadError, /top level/)
       end
 
       it 'rejects a GlobalID whose value is not a string' do

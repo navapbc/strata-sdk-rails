@@ -6,10 +6,14 @@ module Strata
     # can be stored and delivered later. It uses ActiveJob::Arguments, which keeps
     # symbol keys and stores records as GlobalID references.
     #
-    # Payloads should contain identifiers, not record attributes or PII. In
-    # development and test, serialize raises if a payload contains anything other
-    # than scalars, timestamps, saved records, or hashes and arrays of those.
-    # Production skips that check so it cannot reject a person's submission.
+    # Payloads should contain identifiers, not record attributes or PII. serialize
+    # raises if a payload contains anything other than scalars, timestamps, saved
+    # records, or hashes and arrays of those. The check runs in every environment
+    # because deserialize refuses anything else, so a payload that skipped it
+    # would be stored but could never be delivered.
+    #
+    # GlobalIDs are only accepted for the current GlobalID.app, so renaming the
+    # host application makes previously stored record references undeliverable.
     #
     # See docs/specs/durable-events/spec.md#payload-contract.
     #
@@ -18,8 +22,8 @@ module Strata
     #   Strata::Events::Payload.deserialize(data) # => { case_id: "..." }
     #
     module Payload
-      # Raised in development and test when a payload contains a value that is not
-      # an identifier, timestamp, or saved record.
+      # Raised when a payload contains a value that is not an identifier,
+      # timestamp, or saved record, or a hash key that is not a string or symbol.
       class InvalidPayloadError < ArgumentError; end
 
       # Raised when stored data names a serializer or GlobalID class that a
@@ -32,24 +36,26 @@ module Strata
       ].freeze
 
       # The ActiveJob serializers that ALLOWED_SCALARS can produce.
-      ALLOWED_SERIALIZERS = %w[
-        ActiveJob::Serializers::SymbolSerializer
-        ActiveJob::Serializers::BigDecimalSerializer
-        ActiveJob::Serializers::DateSerializer
-        ActiveJob::Serializers::DateTimeSerializer
-        ActiveJob::Serializers::TimeSerializer
+      ALLOWED_SERIALIZERS = [
+        ActiveJob::Serializers::SymbolSerializer,
+        ActiveJob::Serializers::BigDecimalSerializer,
+        ActiveJob::Serializers::DateSerializer,
+        ActiveJob::Serializers::DateTimeSerializer,
+        ActiveJob::Serializers::TimeSerializer,
         ActiveJob::Serializers::TimeWithZoneSerializer
-      ].to_set.freeze
+      ].to_set(&:name).freeze
+
+      # Keys that make ActiveJob deserialize a hash as something other than a Hash.
+      VALUE_WRAPPER_KEYS = %w[_aj_globalid _aj_serialized].freeze
 
       class << self
         # @param [Hash] payload The event payload
         # @return [Hash] A JSON-compatible hash
-        # @raise [InvalidPayloadError] in development and test, for values that are not identifiers
-        # @raise [ActiveJob::SerializationError] for values ActiveJob cannot serialize
+        # @raise [InvalidPayloadError] for values that are not identifiers, timestamps, or saved records
         def serialize(payload)
           raise ArgumentError, "Event payload must be a Hash, got #{payload.class}" unless payload.is_a?(Hash)
 
-          validate_identifiers!(payload, []) if Rails.env.local?
+          validate_identifiers!(payload, [])
           ActiveJob::Arguments.serialize([ payload ]).first
         end
 
@@ -57,11 +63,21 @@ module Strata
         # @return [Hash] The payload, with records loaded in their current state
         # @raise [UnsafePayloadError] if the data names a serializer or GlobalID that serialize could not produce
         # @raise [ActiveJob::DeserializationError] if a referenced record no longer exists
+        # @raise [StandardError] the original error, unwrapped, if loading a record fails for another reason
         def deserialize(data)
           raise ArgumentError, "Event payload must be a Hash, got #{data.class}" unless data.is_a?(Hash)
+          if VALUE_WRAPPER_KEYS.any? { |key| data.key?(key) }
+            raise UnsafePayloadError, "Event payload must be a Hash at the top level, not a serialized value"
+          end
 
           ensure_safe!(data)
           ActiveJob::Arguments.deserialize([ data ]).first
+        rescue ActiveJob::DeserializationError => e
+          # ActiveJob wraps every error in DeserializationError. Only a missing record is
+          # permanent; anything else (such as a lost connection) may succeed on retry.
+          raise if e.cause.nil? || e.cause.is_a?(ActiveRecord::RecordNotFound)
+
+          raise e.cause
         end
 
         private
@@ -69,20 +85,37 @@ module Strata
         def validate_identifiers!(value, path)
           case value
           when Hash
-            value.each { |key, nested| validate_identifiers!(nested, [ *path, key ]) }
+            value.each do |key, nested|
+              validate_key!(key, path)
+              validate_identifiers!(nested, [ *path, key ])
+            end
           when Array
             value.each_with_index { |nested, index| validate_identifiers!(nested, [ *path, index ]) }
           when ActiveRecord::Base
-            raise InvalidPayloadError, "Event payload record at #{path.join('.')} must be saved" unless value.persisted?
+            raise InvalidPayloadError, "Event payload record at #{path_label(path)} must be saved" unless value.persisted?
           when Float
-            raise InvalidPayloadError, "Event payload value at #{path.join('.')} must be finite" unless value.finite?
+            raise InvalidPayloadError, "Event payload value at #{path_label(path)} must be finite" unless value.finite?
           when *ALLOWED_SCALARS
             nil
           else
             raise InvalidPayloadError,
-              "Event payload value at #{path.join('.')} is a #{value.class}; payloads may only contain " \
+              "Event payload value at #{path_label(path)} is a #{value.class}; payloads may only contain " \
               "identifiers, timestamps, and saved records"
           end
+        end
+
+        def validate_key!(key, path)
+          unless key.is_a?(String) || key.is_a?(Symbol)
+            raise InvalidPayloadError,
+              "Event payload at #{path_label(path)} has key #{key.inspect}, a #{key.class}; keys must be strings or symbols"
+          end
+          return unless key.to_s.start_with?("_aj_")
+
+          raise InvalidPayloadError, "Event payload at #{path_label(path)} has key #{key.inspect}, which ActiveJob reserves"
+        end
+
+        def path_label(path)
+          path.empty? ? "top level" : path.join(".")
         end
 
         def ensure_safe!(value)
