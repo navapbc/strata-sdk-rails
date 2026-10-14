@@ -13,7 +13,8 @@ module Strata
 
     belongs_to :event, class_name: "Strata::Event", inverse_of: :deliveries
 
-    enum :status, pending: 0, succeeded: 1, failed: 2, no_match: 3, dead: 4
+    # The sweep index's partial condition lists the pending and failed values.
+    enum :status, { pending: 0, succeeded: 1, failed: 2, no_match: 3, dead: 4 }, validate: true
 
     normalizes :last_error, with: ->(error) { error.truncate(LAST_ERROR_LIMIT) }
 

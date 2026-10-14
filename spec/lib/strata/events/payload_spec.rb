@@ -22,7 +22,8 @@ RSpec.describe Strata::Events::Payload do
     end
 
     describe 'allowed values' do
-      [ nil, true, false, 'text', 42, 1.5 ].each do |value|
+      # Floats below 1e16 come back from jsonb as floats.
+      [ nil, true, false, 'text', 42, 1.5, 9.9e15, -1.0e15, 1.0e-5 ].each do |value|
         it "allows #{value.inspect}" do
           expect(described_class.serialize({ value: value })).to eq({ 'value' => value })
         end
@@ -54,6 +55,22 @@ RSpec.describe Strata::Events::Payload do
 
         expect(described_class.serialize(payload))
           .to eq({ 'a' => '2026-10-13T01:02:03.000000Z', 'b' => '2026-10-13T01:02:03.000000Z' })
+      end
+
+      it "leaves the publisher's times in their original zone" do
+        time = Time.new(2026, 10, 13, 3, 2, 3, '+02:00')
+        time_with_zone = Time.use_zone('America/New_York') { Time.zone.parse('2026-10-13 06:30:00') }
+
+        described_class.serialize({ a: time, b: time_with_zone })
+
+        expect(time.utc_offset).to eq(2 * 3600)
+        expect(time_with_zone.to_time.utc_offset).to eq(-4 * 3600)
+      end
+
+      it 'stores frozen times' do
+        time = Time.new(2026, 10, 13, 3, 2, 3, '+02:00').freeze
+
+        expect(described_class.serialize({ at: time })).to eq({ 'at' => '2026-10-13T01:02:03.000000Z' })
       end
 
       it 'stores dates as ISO 8601 date strings' do
@@ -98,6 +115,13 @@ RSpec.describe Strata::Events::Payload do
         it "rejects #{value} because JSON stores it as null" do
           expect { described_class.serialize({ score: value }) }
             .to raise_error(Strata::Events::Payload::InvalidPayloadError, /score/)
+        end
+      end
+
+      [ 1.0e16, -1.0e16, 1.0e20 ].each do |value|
+        it "rejects #{value} because jsonb returns it as an integer, and suggests an integer or string" do
+          expect { described_class.serialize({ meta: { total: value } }) }
+            .to raise_error(Strata::Events::Payload::InvalidPayloadError, /meta\.total.*integer or a string/)
         end
       end
 

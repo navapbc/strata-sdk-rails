@@ -7,7 +7,7 @@ module Strata
     #
     # Payloads contain identifiers, not records, record attributes, or PII.
     # serialize raises unless a payload is a hash of strings, integers, finite
-    # floats, booleans, nil, times, dates, and nested hashes and arrays of those.
+    # floats below 1e16, booleans, nil, times, dates, and nested hashes and arrays of those.
     # Times are stored as ISO 8601 UTC strings and dates as ISO 8601 date
     # strings; both come back as strings.
     # deserialize returns the stored JSON with symbol keys; it never loads a
@@ -27,6 +27,9 @@ module Strata
       # Raised when stored payload data is not a hash, which means the stored
       # row is corrupt rather than that a publisher sent a bad payload.
       class CorruptPayloadError < StandardError; end
+
+      # Ruby writes floats this large in exponent form, and jsonb returns them as integers.
+      LARGEST_EXACT_FLOAT = 1.0e16
 
       class << self
         # @param [Hash] payload The event payload
@@ -59,6 +62,11 @@ module Strata
             value
           when Float
             raise InvalidPayloadError, "Event payload value at #{path_label(path)} must be finite" unless value.finite?
+            if value.abs >= LARGEST_EXACT_FLOAT
+              raise InvalidPayloadError,
+                "Event payload value at #{path_label(path)} is too large a float to store unchanged; " \
+                "publish an integer or a string instead"
+            end
 
             value
           when String
@@ -66,7 +74,7 @@ module Strata
               "Event payload string at #{path_label(path)} must be valid UTF-8 without NUL bytes")
           when ActiveSupport::TimeWithZone, Time, DateTime
             # Normalize to UTC so equal instants always store identical strings.
-            value.to_time.utc.iso8601(6)
+            value.to_time.getutc.iso8601(6)
           when Date
             value.iso8601
           when BigDecimal

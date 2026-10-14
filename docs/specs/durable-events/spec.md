@@ -128,9 +128,11 @@ unrelated case updates.
 > (dummy app migration) and the `Strata::Event` and `Strata::EventDelivery`
 > models. Nothing writes to them yet, and the install generator is not yet
 > available. Events are read-only once saved, like `Strata::AuditLine`, and
-> record an optional polymorphic publisher. An event is valid only if its
-> payload is exactly what `Strata::Events::Payload.serialize` returns. `last_error` keeps at most 1,000
-> characters because error messages can contain personal data. The design
+> record an optional polymorphic publisher. The `Strata::Events::PayloadType`
+> attribute type runs every assigned payload through
+> `Strata::Events::Payload.serialize`, so a payload that breaks the contract
+> raises `InvalidPayloadError` before it is saved. `last_error` keeps at most
+> 1,000 characters because error messages can contain personal data. The design
 > keeps one current step per case; parallel steps within a case are not
 > planned.
 
@@ -145,8 +147,9 @@ tampered payload row cannot make a worker load arbitrary code.
 Rules:
 
 - Payloads contain identifiers, not records, record attributes, or PII.
-- Allowed values are strings, integers, finite floats, booleans, `nil`,
-  times, dates, and hashes and arrays of those. Keys are strings or symbols.
+- Allowed values are strings, integers, finite floats below 1e16, booleans,
+  `nil`, times, dates, and hashes and arrays of those. Keys are strings or
+  symbols. Larger floats are rejected because jsonb returns them as integers.
 - Times are stored as ISO 8601 UTC strings with microseconds, so equal
   instants always store identical strings. Dates are stored as ISO 8601 date
   strings. Both come back as strings; handlers parse them when needed.

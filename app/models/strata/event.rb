@@ -16,26 +16,14 @@ module Strata
     has_many :deliveries, class_name: "Strata::EventDelivery", inverse_of: :event
     belongs_to :publisher, polymorphic: true, optional: true
 
+    # Payloads are serialized when first read or saved, and raise if they break the contract.
+    attribute :payload, Strata::Events::PayloadType.new
+
     validates :name, presence: true
     validates :published_at, presence: true
-    validate :payload_is_serialized, if: :payload_changed?
 
     def readonly?
       persisted?
-    end
-
-    private
-
-    # Payloads are stored exactly as Strata::Events::Payload.serialize returns them.
-    # The jsonb type converts any value to JSON on assignment, so this checks the
-    # value as assigned, before that conversion hides records and Ruby times.
-    def payload_is_serialized
-      assigned = payload_before_type_cast
-      return if Strata::Events::Payload.serialize(assigned) == assigned
-
-      errors.add(:payload, "must be serialized with Strata::Events::Payload.serialize")
-    rescue Strata::Events::Payload::InvalidPayloadError => e
-      errors.add(:payload, e.message)
     end
   end
 end

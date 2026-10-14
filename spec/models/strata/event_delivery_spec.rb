@@ -26,6 +26,17 @@ RSpec.describe Strata::EventDelivery do
     end
   end
 
+  describe 'sweep index' do
+    it 'covers exactly the pending and failed statuses, so reordering the enum fails here' do
+      definition = described_class.connection.select_value(<<~SQL)
+        SELECT indexdef FROM pg_indexes WHERE indexname = 'index_strata_event_deliveries_on_sweep'
+      SQL
+      statuses = described_class.statuses.values_at('pending', 'failed')
+
+      expect(definition).to include("ARRAY[#{statuses.join(', ')}]")
+    end
+  end
+
   describe 'validations' do
     it 'requires an event' do
       delivery = build(:strata_event_delivery, event: nil)
@@ -39,6 +50,13 @@ RSpec.describe Strata::EventDelivery do
 
       expect(delivery).not_to be_valid
       expect(delivery.errors[:subscriber]).to be_present
+    end
+
+    it 'rejects an unknown status' do
+      delivery = build(:strata_event_delivery, status: 'retrying')
+
+      expect(delivery).not_to be_valid
+      expect(delivery.errors[:status]).to be_present
     end
 
     it 'does not allow negative attempts' do
