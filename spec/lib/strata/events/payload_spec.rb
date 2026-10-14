@@ -17,7 +17,8 @@ RSpec.describe Strata::Events::Payload do
     end
 
     it 'raises when the payload is not a hash' do
-      expect { described_class.serialize([ 1, 2 ]) }.to raise_error(ArgumentError, /must be a Hash/)
+      expect { described_class.serialize([ 1, 2 ]) }
+        .to raise_error(Strata::Events::Payload::InvalidPayloadError, /must be a Hash/)
     end
 
     describe 'allowed values' do
@@ -34,16 +35,25 @@ RSpec.describe Strata::Events::Payload do
           .to eq({ 'ids' => [ 'a', 'b' ], 'meta' => { 'count' => 2, 'flags' => [ true, { 'x' => nil } ] } })
       end
 
-      it 'stores times as ISO 8601 strings with microseconds' do
-        submitted_at = Time.zone.parse('2026-10-13 10:30:00.123456')
+      it 'stores times as ISO 8601 UTC strings with microseconds' do
+        submitted_at = Time.use_zone('UTC') { Time.zone.parse('2026-10-13 10:30:00.123456') }
 
         expect(described_class.serialize({ submitted_at: submitted_at }))
           .to eq({ 'submitted_at' => '2026-10-13T10:30:00.123456Z' })
       end
 
-      it 'stores Time and DateTime values as ISO 8601 strings' do
-        expect(described_class.serialize({ a: Time.utc(2026, 10, 13, 1, 2, 3), b: DateTime.new(2026, 10, 13, 1, 2, 3) }))
-          .to eq({ 'a' => '2026-10-13T01:02:03.000000Z', 'b' => '2026-10-13T01:02:03.000000+00:00' })
+      it 'converts times in other zones to UTC so equal instants store identical strings' do
+        submitted_at = Time.use_zone('America/New_York') { Time.zone.parse('2026-10-13 06:30:00.123456') }
+
+        expect(described_class.serialize({ submitted_at: submitted_at }))
+          .to eq({ 'submitted_at' => '2026-10-13T10:30:00.123456Z' })
+      end
+
+      it 'stores Time and DateTime values as ISO 8601 UTC strings' do
+        payload = { a: Time.new(2026, 10, 13, 3, 2, 3, '+02:00'), b: DateTime.new(2026, 10, 13, 3, 2, 3, '+02:00') }
+
+        expect(described_class.serialize(payload))
+          .to eq({ 'a' => '2026-10-13T01:02:03.000000Z', 'b' => '2026-10-13T01:02:03.000000Z' })
       end
 
       it 'stores dates as ISO 8601 date strings' do
@@ -58,7 +68,6 @@ RSpec.describe Strata::Events::Payload do
     describe 'rejected values' do
       {
         'a symbol, which would come back as a string' => :approved,
-        'a BigDecimal, which JSON cannot store exactly' => BigDecimal('9.99'),
         'a Range' => (1..2),
         'an arbitrary object' => Object.new
       }.each do |description, value|
@@ -66,6 +75,11 @@ RSpec.describe Strata::Events::Payload do
           expect { described_class.serialize({ meta: { value: value } }) }
             .to raise_error(Strata::Events::Payload::InvalidPayloadError, /meta\.value.*#{value.class}/)
         end
+      end
+
+      it 'rejects a BigDecimal, which JSON cannot store exactly, and suggests cents or a string' do
+        expect { described_class.serialize({ meta: { amount: BigDecimal('9.99') } }) }
+          .to raise_error(Strata::Events::Payload::InvalidPayloadError, /meta\.amount.*BigDecimal.*cents.*string/)
       end
 
       it 'rejects records and asks for an identifier instead' do
@@ -105,6 +119,16 @@ RSpec.describe Strata::Events::Payload do
           .to raise_error(Strata::Events::Payload::InvalidPayloadError, /counts.*Integer/)
       end
 
+      it 'names only the class of an unsupported key, so record attributes stay out of logs' do
+        kase = TestCase.create!(business_process_current_step: 'secret_step')
+
+        expect { described_class.serialize({ meta: { kase => 1 } }) }
+          .to raise_error(Strata::Events::Payload::InvalidPayloadError) { |error|
+            expect(error.message).to include('TestCase')
+            expect(error.message).not_to include('secret_step')
+          }
+      end
+
       it 'rejects a hash with both the symbol and string form of a key, which would collide' do
         expect { described_class.serialize({ meta: { case_id: 'a', 'case_id' => 'b' } }) }
           .to raise_error(Strata::Events::Payload::InvalidPayloadError, /meta.*case_id/)
@@ -130,7 +154,7 @@ RSpec.describe Strata::Events::Payload do
     end
 
     it 'returns times as ISO 8601 strings that parse back to the same instant' do
-      submitted_at = Time.zone.parse('2026-10-13 10:30:00.123456')
+      submitted_at = Time.use_zone('UTC') { Time.zone.parse('2026-10-13 10:30:00.123456') }
 
       result = round_trip({ submitted_at: submitted_at })
 
@@ -148,7 +172,8 @@ RSpec.describe Strata::Events::Payload do
 
     [ nil, 'x', [ 1 ] ].each do |data|
       it "raises when the stored data is a #{data.class} instead of a Hash" do
-        expect { described_class.deserialize(data) }.to raise_error(ArgumentError, /must be a Hash/)
+        expect { described_class.deserialize(data) }
+          .to raise_error(Strata::Events::Payload::CorruptPayloadError, /must be a Hash/)
       end
     end
   end

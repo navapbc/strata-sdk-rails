@@ -106,7 +106,7 @@ Delivery statuses are:
 | `succeeded` | The subscriber completed and applied work, or returned an unrecognized success value. |
 | `failed` | The latest attempt raised. A non-null `next_attempt_at` means another retry is required. |
 | `no_match` | The subscriber ran but no transition matched. |
-| `dead` | Retries were exhausted or the payload can no longer be deserialized. Operator action is required. |
+| `dead` | Retries were exhausted or the stored payload is corrupt. Operator action is required. |
 
 A unique database index prevents duplicate rows for the same event and
 subscriber. The event foreign key uses `ON DELETE CASCADE` so pruning an event
@@ -137,10 +137,12 @@ Rules:
 - Payloads contain identifiers, not records, record attributes, or PII.
 - Allowed values are strings, integers, finite floats, booleans, `nil`,
   times, dates, and hashes and arrays of those. Keys are strings or symbols.
-- Times and dates are stored as ISO 8601 strings (times with microseconds)
-  and come back as strings. Handlers parse them when needed.
+- Times are stored as ISO 8601 UTC strings with microseconds, so equal
+  instants always store identical strings. Dates are stored as ISO 8601 date
+  strings. Both come back as strings; handlers parse them when needed.
 - Every other value is rejected, including symbols (which would come back as
-  strings), `BigDecimal`, records, NaN and Infinity, strings that are not
+  strings), `BigDecimal` (publish integer cents or a string), records, NaN
+  and Infinity, strings that are not
   valid UTF-8 or contain NUL bytes, and hashes whose keys would collide once
   stringified. The error names the path to the bad value.
 - String keys come back as symbols, so `{ "case_id" => id }` is read as
@@ -153,6 +155,16 @@ Rules:
 - A payload that refers to a deleted record still deserializes; the handler
   decides what a missing record means, such as a `no_match` when no case is
   found.
+- Stored data that is not a hash raises `CorruptPayloadError`; the delivery
+  becomes `dead` without retry.
+- Starting in Phase 2, subscribers receive the deserialized payload rather
+  than the hash the publisher passed in.
+
+**Breaking for host apps:** once `publish` stores events, subscribers see
+payloads after a JSON round trip. Times arrive as ISO 8601 UTC strings (for
+example, `ApplicationForm`'s `submitted_at`), and string keys arrive as
+symbols. No subscriber in this repository reads `submitted_at`; host
+subscribers that do must parse it.
 
 > **Implemented**: `Strata::Events::Payload.serialize` and `.deserialize`,
 > not yet called by `publish`.
@@ -339,7 +351,7 @@ No web console is included. Operators use rake tasks and model scopes.
 | `strata:events:replay_dead[event_name]` | Replay dead deliveries in bulk. |
 | `strata:events:requeue_stranded` | Recover initial deliveries and retries whose committed attempt was never enqueued. |
 | `strata:events:prune[days]` | Delete events older than the configured or supplied age. |
-| `strata:events:check_payloads[event_name]` | Find incompatible payloads before enabling durability. |
+| `strata:events:check_payloads[event_name]` | Run `Payload.serialize` against the host's publishers to find payloads it would reject. |
 
 Replay is privileged because it can create tasks, advance cases, send notices,
 or call external systems. It remains shell-only. Any future HTTP interface
@@ -402,8 +414,13 @@ rescue keeps the form or task saved while rolling back the failed case step.
 - Persist event and delivery rows.
 - Keep delivery synchronous and in-process while storage is validated.
 
+- Deliver the deserialized payload to subscribers, so they receive the same
+  values in Phase 2 that a Phase 3 worker will read from the stored row.
+
 This phase can reject an originating write when a host publishes a payload
-ActiveJob cannot serialize. Hosts must run the payload preflight first.
+that `Payload.serialize` rejects. The `check_payloads` task must ship before
+or with the slice that makes `publish` store events, and hosts must run it
+before upgrading.
 
 ### Phase 3: deliver durably
 
@@ -432,7 +449,8 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 
 1. Upgrade the gem; behavior remains unchanged because durability defaults off.
 2. Run `rails generate strata:events` and migrate.
-3. Run `rake strata:events:check_payloads` and fix incompatible publishers.
+3. Run `rake strata:events:check_payloads` and fix publishers whose payloads
+   `Payload.serialize` rejects.
 4. Replace anonymous lambda, proc, and callable-object subscribers with named
    class or module methods.
 5. Add the generated monotonic transition-version field to existing host case
