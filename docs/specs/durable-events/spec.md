@@ -106,7 +106,7 @@ Delivery statuses are:
 | `succeeded` | The subscriber completed and applied work, or returned an unrecognized success value. |
 | `failed` | The latest attempt raised. A non-null `next_attempt_at` means another retry is required. |
 | `no_match` | The subscriber ran but no transition matched. |
-| `dead` | Retries were exhausted or the payload can no longer be deserialized. Operator action is required. |
+| `dead` | Retries were exhausted or the stored payload is corrupt. Operator action is required. |
 
 A unique database index prevents duplicate rows for the same event and
 subscriber. The event foreign key uses `ON DELETE CASCADE` so pruning an event
@@ -126,24 +126,48 @@ unrelated case updates.
 
 ## Payload contract
 
-Payloads use `ActiveJob::Arguments.serialize` and `deserialize` rather than raw
-JSON. This preserves symbol keys and converts ActiveRecord objects to GlobalID
-references.
+Payloads are stored as plain JSON. `Strata::Events::Payload.serialize`
+validates a payload and converts it to a hash with string keys;
+`deserialize` returns the stored hash with symbol keys at every level.
+Deserializing never loads a class or record named in stored data, so a
+tampered payload row cannot make a worker load arbitrary code.
 
 Rules:
 
-- Payloads contain identifiers, not record attributes or PII.
-- Development and test validate that values are scalars, GlobalID-capable
-  records, or collections of those values.
-- Production does not run the identifier-only validation, so it cannot reject
-  a person's submission for that policy check.
-- A payload ActiveJob cannot serialize is a programming error. Publishing
-  raises before writing an event row. Because publishing happens in model
-  callbacks, this can reject the originating domain write.
-- Replaying a GlobalID reads the record's current state, not a historical
-  snapshot.
-- A GlobalID for a deleted record is terminal: the delivery becomes `dead`
-  without retry.
+- Payloads contain identifiers, not records, record attributes, or PII.
+- Allowed values are strings, integers, finite floats, booleans, `nil`,
+  times, dates, and hashes and arrays of those. Keys are strings or symbols.
+- Times are stored as ISO 8601 UTC strings with microseconds, so equal
+  instants always store identical strings. Dates are stored as ISO 8601 date
+  strings. Both come back as strings; handlers parse them when needed.
+- Every other value is rejected, including symbols (which would come back as
+  strings), `BigDecimal` (publish integer cents or a string), records, NaN
+  and Infinity, strings that are not
+  valid UTF-8 or contain NUL bytes, and hashes whose keys would collide once
+  stringified. The error names the path to the bad value.
+- String keys come back as symbols, so `{ "case_id" => id }` is read as
+  `{ case_id: id }`.
+- Every environment runs the same check, because a payload that cannot be
+  stored and returned unchanged would otherwise be stored but never
+  delivered correctly. Publishing raises before writing an event row. Because
+  publishing happens in model callbacks, this can reject the originating
+  domain write.
+- A payload that refers to a deleted record still deserializes; the handler
+  decides what a missing record means, such as a `no_match` when no case is
+  found.
+- Stored data that is not a hash raises `CorruptPayloadError`; the delivery
+  becomes `dead` without retry.
+- Starting in Phase 2, subscribers receive the deserialized payload rather
+  than the hash the publisher passed in.
+
+**Breaking for host apps:** once `publish` stores events, subscribers see
+payloads after a JSON round trip. Times arrive as ISO 8601 UTC strings (for
+example, `ApplicationForm`'s `submitted_at`), and string keys arrive as
+symbols. No subscriber in this repository reads `submitted_at`; host
+subscribers that do must parse it.
+
+> **Implemented**: `Strata::Events::Payload.serialize` and `.deserialize`,
+> not yet called by `publish`.
 
 ## Delivery guarantees
 
@@ -327,7 +351,7 @@ No web console is included. Operators use rake tasks and model scopes.
 | `strata:events:replay_dead[event_name]` | Replay dead deliveries in bulk. |
 | `strata:events:requeue_stranded` | Recover initial deliveries and retries whose committed attempt was never enqueued. |
 | `strata:events:prune[days]` | Delete events older than the configured or supplied age. |
-| `strata:events:check_payloads[event_name]` | Find incompatible payloads before enabling durability. |
+| `strata:events:check_payloads[event_name]` | Run `Payload.serialize` against the host's publishers to find payloads it would reject. |
 
 Replay is privileged because it can create tasks, advance cases, send notices,
 or call external systems. It remains shell-only. Any future HTTP interface
@@ -390,8 +414,13 @@ rescue keeps the form or task saved while rolling back the failed case step.
 - Persist event and delivery rows.
 - Keep delivery synchronous and in-process while storage is validated.
 
+- Deliver the deserialized payload to subscribers, so they receive the same
+  values in Phase 2 that a Phase 3 worker will read from the stored row.
+
 This phase can reject an originating write when a host publishes a payload
-ActiveJob cannot serialize. Hosts must run the payload preflight first.
+that `Payload.serialize` rejects. The `check_payloads` task must ship before
+or with the slice that makes `publish` store events, and hosts must run it
+before upgrading.
 
 ### Phase 3: deliver durably
 
@@ -411,7 +440,8 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 | --- | --- | --- |
 | Handler outcome contract: transitions return `:transitioned` or `:no_match` | 1 | Done |
 | Per-case structured outcome log | 1 | Done |
-| Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | In review |
+| Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | Done |
+| Payload serialization (`Strata::Events::Payload`) | 2 | In review |
 | Event and delivery persistence | 2 | Not started |
 | Durable ActiveJob delivery | 3 | Not started |
 
@@ -419,7 +449,8 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 
 1. Upgrade the gem; behavior remains unchanged because durability defaults off.
 2. Run `rails generate strata:events` and migrate.
-3. Run `rake strata:events:check_payloads` and fix incompatible publishers.
+3. Run `rake strata:events:check_payloads` and fix publishers whose payloads
+   `Payload.serialize` rejects.
 4. Replace anonymous lambda, proc, and callable-object subscribers with named
    class or module methods.
 5. Add the generated monotonic transition-version field to existing host case
@@ -519,16 +550,18 @@ ActiveJob cannot serialize. Hosts must run the payload preflight first.
 
 ### Payload compatibility is preserved
 
-- **Given** a payload contains symbol keys, nested supported values, and a
-  GlobalID-capable record
+- **Given** a payload contains symbol keys, identifiers, a timestamp, and
+  nested supported values
 - **When** it is serialized and deserialized
-- **Then** symbol access still works and the record reference resolves.
+- **Then** symbol access still works, identifiers are unchanged, and the
+  timestamp is an ISO 8601 string for the same instant.
 
-### Deleted GlobalID does not retry forever
+### Stored payloads never load code
 
-- **Given** a payload references a record that was deleted before delivery
+- **Given** a stored payload row contains a class name or a GlobalID string
 - **When** the job deserializes it
-- **Then** the delivery becomes `dead` without another retry.
+- **Then** the value comes back as a plain string and no class or record is
+  loaded.
 
 ### Pruning removes complete event history safely
 
@@ -559,7 +592,7 @@ Resolved:
    `Strata::Events.retention_period` defaults to `nil`, and each host must set
    it according to its own policy before enabling pruning.
 2. **Database encryption at rest is the SDK baseline.** Payloads are limited
-   to identifiers, GlobalID references, and timestamps. Application-level
+   to identifiers, timestamps, and other plain JSON values. Application-level
    payload encryption is optional and remains a host responsibility when its
    policy requires stronger protection.
 3. **Durability uses a two-release rollout.**
