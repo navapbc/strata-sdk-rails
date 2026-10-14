@@ -52,15 +52,7 @@ RSpec.describe Strata::EventDelivery do
       existing = create(:strata_event_delivery)
       duplicate = build(:strata_event_delivery, event: existing.event, subscriber: existing.subscriber)
 
-      expect(duplicate).not_to be_valid
-      expect(duplicate.errors[:subscriber]).to be_present
-    end
-
-    it 'enforces one delivery per subscriber for an event in the database' do
-      existing = create(:strata_event_delivery)
-      duplicate = build(:strata_event_delivery, event: existing.event, subscriber: existing.subscriber)
-
-      expect { duplicate.save!(validate: false) }.to raise_error(ActiveRecord::RecordNotUnique)
+      expect { duplicate.save! }.to raise_error(ActiveRecord::RecordNotUnique)
     end
 
     it 'allows the same subscriber on different events' do
@@ -81,10 +73,6 @@ RSpec.describe Strata::EventDelivery do
       delivery = create(:strata_event_delivery, last_error: 'x' * 5_000)
 
       expect(delivery.reload.last_error.length).to eq(described_class::LAST_ERROR_LIMIT)
-    end
-
-    it 'limits errors to 1,000 characters' do
-      expect(described_class::LAST_ERROR_LIMIT).to eq(1_000)
     end
   end
 

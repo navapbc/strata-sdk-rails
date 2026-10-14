@@ -42,8 +42,9 @@ class CreateStrataEvents < ActiveRecord::Migration[7.2]
 
     add_index :strata_event_deliveries, [ :event_id, :subscriber ], unique: true
 
-    # Serves the stranded-attempt sweeper: due, unenqueued pending and failed deliveries
-    add_index :strata_event_deliveries, [ :status, :next_attempt_at, :enqueued_at ],
+    # Serves the stranded-attempt sweeper: due, unenqueued pending (0) and failed (2) deliveries
+    add_index :strata_event_deliveries, :next_attempt_at,
+              where: "status IN (0, 2) AND enqueued_at IS NULL",
               name: "index_strata_event_deliveries_on_sweep"
   end
 end

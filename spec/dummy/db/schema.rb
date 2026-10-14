@@ -100,7 +100,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_14_163827) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["event_id", "subscriber"], name: "index_strata_event_deliveries_on_event_id_and_subscriber", unique: true
-    t.index ["status", "next_attempt_at", "enqueued_at"], name: "index_strata_event_deliveries_on_sweep"
+    t.index ["next_attempt_at"], name: "index_strata_event_deliveries_on_sweep", where: "((status = ANY (ARRAY[0, 2])) AND (enqueued_at IS NULL))"
   end
 
   create_table "strata_events", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|

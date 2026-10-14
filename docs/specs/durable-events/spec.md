@@ -128,7 +128,8 @@ unrelated case updates.
 > (dummy app migration) and the `Strata::Event` and `Strata::EventDelivery`
 > models. Nothing writes to them yet, and the install generator is not yet
 > available. Events are read-only once saved, like `Strata::AuditLine`, and
-> record an optional polymorphic publisher. `last_error` keeps at most 1,000
+> record an optional polymorphic publisher. An event is valid only if its
+> payload is exactly what `Strata::Events::Payload.serialize` returns. `last_error` keeps at most 1,000
 > characters because error messages can contain personal data. The design
 > keeps one current step per case; parallel steps within a case are not
 > planned.

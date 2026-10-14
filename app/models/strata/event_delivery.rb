@@ -17,7 +17,8 @@ module Strata
 
     normalizes :last_error, with: ->(error) { error.truncate(LAST_ERROR_LIMIT) }
 
-    validates :subscriber, presence: true, uniqueness: { scope: :event_id }
+    # One delivery per subscriber for an event is enforced by a unique index.
+    validates :subscriber, presence: true
     validates :attempts, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   end
 end

@@ -33,6 +33,33 @@ RSpec.describe Strata::Event do
 
       expect(event.reload.payload).to eq({ 'case_id' => 'abc', 'nested' => [ 1, nil ] })
     end
+
+    it 'accepts a payload produced by Strata::Events::Payload.serialize' do
+      payload = Strata::Events::Payload.serialize({ case_id: 'abc', submitted_at: Time.utc(2026, 10, 14, 12) })
+
+      expect(build(:strata_event, payload: payload)).to be_valid
+    end
+
+    it 'rejects a missing payload' do
+      event = build(:strata_event, payload: nil)
+
+      expect(event).not_to be_valid
+      expect(event.errors[:payload]).to include(/must be a Hash/)
+    end
+
+    it 'rejects a payload that breaks the payload contract' do
+      event = build(:strata_event, payload: { 'kase' => TestCase.new })
+
+      expect(event).not_to be_valid
+      expect(event.errors[:payload]).to include(/publish its id instead/)
+    end
+
+    it 'rejects a payload that was not serialized first' do
+      event = build(:strata_event, payload: { case_id: 'abc', submitted_at: Time.utc(2026, 10, 14, 12) })
+
+      expect(event).not_to be_valid
+      expect(event.errors[:payload]).to include(/Strata::Events::Payload.serialize/)
+    end
   end
 
   describe 'publisher' do
