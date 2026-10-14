@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_04_221320) do
+ActiveRecord::Schema[8.0].define(version: 2026_10_14_163827) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -86,6 +86,33 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_04_221320) do
     t.index ["determined_at"], name: "index_strata_determinations_on_determined_at"
     t.index ["determined_by_id"], name: "index_strata_determinations_on_determined_by_id"
     t.index ["subject_id", "subject_type"], name: "index_strata_determinations_on_polymorphic_subject"
+  end
+
+  create_table "strata_event_deliveries", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "event_id", null: false
+    t.string "subscriber", null: false
+    t.integer "status", default: 0, null: false
+    t.integer "attempts", default: 0, null: false
+    t.datetime "next_attempt_at"
+    t.datetime "enqueued_at"
+    t.text "last_error"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["event_id", "subscriber"], name: "index_strata_event_deliveries_on_event_id_and_subscriber", unique: true
+    t.index ["status", "next_attempt_at", "enqueued_at"], name: "index_strata_event_deliveries_on_sweep"
+  end
+
+  create_table "strata_events", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "name", null: false
+    t.jsonb "payload", default: {}, null: false
+    t.uuid "publisher_id"
+    t.string "publisher_type"
+    t.datetime "published_at", null: false
+    t.datetime "created_at", null: false
+    t.index ["name", "published_at"], name: "index_strata_events_on_name_and_published_at"
+    t.index ["published_at"], name: "index_strata_events_on_published_at"
+    t.index ["publisher_type", "publisher_id"], name: "index_strata_events_on_polymorphic_publisher"
   end
 
   create_table "strata_tasks", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -177,5 +204,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_04_221320) do
     t.datetime "updated_at", null: false
   end
 
+  add_foreign_key "strata_event_deliveries", "strata_events", column: "event_id", on_delete: :cascade
   add_foreign_key "strata_tasks", "users", column: "assignee_id", on_delete: :nullify
 end
