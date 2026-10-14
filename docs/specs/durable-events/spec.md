@@ -110,8 +110,9 @@ Delivery statuses are:
 
 A unique database index prevents duplicate rows for the same event and
 subscriber. The event foreign key uses `ON DELETE CASCADE` so pruning an event
-also removes its deliveries. An index covering status, `next_attempt_at`, and
-`enqueued_at` supports the stranded-attempt sweeper.
+also removes its deliveries. A partial index on `next_attempt_at` covering
+unenqueued `pending` and `failed` deliveries supports the stranded-attempt
+sweeper.
 
 Targets are deliberately not stored on delivery rows. Cases are resolved once,
 inside the handler at delivery time. This avoids duplicate routing, supports

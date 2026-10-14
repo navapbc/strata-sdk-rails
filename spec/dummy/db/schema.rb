@@ -106,13 +106,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_14_163827) do
   create_table "strata_events", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "name", null: false
     t.jsonb "payload", default: {}, null: false
-    t.uuid "publisher_id"
     t.string "publisher_type"
+    t.uuid "publisher_id"
     t.datetime "published_at", null: false
     t.datetime "created_at", null: false
     t.index ["name", "published_at"], name: "index_strata_events_on_name_and_published_at"
     t.index ["published_at"], name: "index_strata_events_on_published_at"
-    t.index ["publisher_type", "publisher_id"], name: "index_strata_events_on_polymorphic_publisher"
+    t.index ["publisher_type", "publisher_id"], name: "index_strata_events_on_publisher"
   end
 
   create_table "strata_tasks", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|

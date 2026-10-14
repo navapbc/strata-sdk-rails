@@ -29,7 +29,7 @@ module Strata
       class CorruptPayloadError < StandardError; end
 
       # Ruby writes floats this large in exponent form, and jsonb returns them as integers.
-      LARGEST_EXACT_FLOAT = 1.0e16
+      FLOAT_LIMIT = 1.0e16
 
       class << self
         # @param [Hash] payload The event payload
@@ -62,7 +62,7 @@ module Strata
             value
           when Float
             raise InvalidPayloadError, "Event payload value at #{path_label(path)} must be finite" unless value.finite?
-            if value.abs >= LARGEST_EXACT_FLOAT
+            if value.abs >= FLOAT_LIMIT
               raise InvalidPayloadError,
                 "Event payload value at #{path_label(path)} is too large a float to store unchanged; " \
                 "publish an integer or a string instead"

@@ -9,8 +9,7 @@ class CreateStrataEvents < ActiveRecord::Migration[7.2]
       t.jsonb :payload, null: false, default: {}
 
       # Optional polymorphic publisher (the record that published the event)
-      t.uuid   :publisher_id
-      t.string :publisher_type
+      t.references :publisher, polymorphic: true, type: :uuid
 
       t.datetime :published_at, null: false
 
@@ -20,8 +19,6 @@ class CreateStrataEvents < ActiveRecord::Migration[7.2]
 
     add_index :strata_events, [ :name, :published_at ]
     add_index :strata_events, :published_at
-    add_index :strata_events, [ :publisher_type, :publisher_id ],
-              name: "index_strata_events_on_polymorphic_publisher"
 
     create_table :strata_event_deliveries, id: :uuid, default: -> { "gen_random_uuid()" } do |t|
       t.references :event, type: :uuid, null: false, index: false,

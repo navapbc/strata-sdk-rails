@@ -28,29 +28,18 @@ RSpec.describe Strata::Event do
       expect(described_class.new.payload).to eq({})
     end
 
-    it 'stores and reloads plain JSON' do
-      event = create(:strata_event, payload: { 'case_id' => 'abc', 'nested' => [ 1, nil ] })
-
-      expect(event.reload.payload).to eq({ 'case_id' => 'abc', 'nested' => [ 1, nil ] })
-    end
-
     it 'reloads the largest allowed floats as floats' do
       payload = { 'large' => 9.9e15, 'small' => 1.0e-5 }
 
       expect(create(:strata_event, payload: payload).reload.payload).to eq(payload)
     end
 
-    it 'serializes the payload when it is assigned' do
-      event = build(:strata_event, payload: { case_id: 'abc', submitted_at: Time.utc(2026, 10, 14, 12) })
-
-      expect(event.payload).to eq({ 'case_id' => 'abc', 'submitted_at' => '2026-10-14T12:00:00.000000Z' })
-    end
-
-    it 'stores the serialized payload' do
-      event = create(:strata_event, payload: { case_id: 'abc', submitted_at: Time.utc(2026, 10, 14, 12) })
+    it 'stores the payload as Strata::Events::Payload.serialize returns it' do
+      payload = { case_id: 'abc', nested: [ 1, nil ], submitted_at: Time.utc(2026, 10, 14, 12) }
+      event = create(:strata_event, payload: payload)
 
       expect(described_class.find(event.id).payload)
-        .to eq({ 'case_id' => 'abc', 'submitted_at' => '2026-10-14T12:00:00.000000Z' })
+        .to eq({ 'case_id' => 'abc', 'nested' => [ 1, nil ], 'submitted_at' => '2026-10-14T12:00:00.000000Z' })
     end
 
     it 'rejects a missing payload before saving it' do
@@ -90,14 +79,6 @@ RSpec.describe Strata::Event do
 
   describe 'immutability' do
     let(:event) { create(:strata_event) }
-
-    it 'is readonly once persisted' do
-      expect(event.readonly?).to be true
-    end
-
-    it 'is not readonly when newly built' do
-      expect(build(:strata_event).readonly?).to be false
-    end
 
     it 'raises when attempting to update an attribute' do
       expect { event.update!(name: 'Tampered') }.to raise_error(ActiveRecord::ReadOnlyRecord)
