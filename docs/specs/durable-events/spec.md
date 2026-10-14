@@ -450,8 +450,9 @@ before upgrading.
 | Handler outcome contract: transitions return `:transitioned` or `:no_match` | 1 | Done |
 | Per-case structured outcome log | 1 | Done |
 | Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | Done |
-| Payload serialization (`Strata::Events::Payload`) | 2 | In review |
-| Event and delivery persistence | 2 | Not started |
+| Payload serialization (`Strata::Events::Payload`) | 2 | Done |
+| Event and delivery tables and models (`Strata::Event`, `Strata::EventDelivery`) | 2 | In review |
+| Publish writes event and delivery rows | 2 | Not started |
 | Durable ActiveJob delivery | 3 | Not started |
 
 ## Host upgrade checklist
