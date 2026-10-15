@@ -22,8 +22,7 @@ RSpec.describe Strata::Events::Payload do
     end
 
     describe 'allowed values' do
-      # Floats below 1e16 come back from jsonb as floats.
-      [ nil, true, false, 'text', 42, 1.5, 9.9e15, -1.0e15, 1.0e-5 ].each do |value|
+      [ nil, true, false, 'text', 42, 2**70 ].each do |value|
         it "allows #{value.inspect}" do
           expect(described_class.serialize({ value: value })).to eq({ 'value' => value })
         end
@@ -111,15 +110,8 @@ RSpec.describe Strata::Events::Payload do
           .to raise_error(Strata::Events::Payload::InvalidPayloadError, /items\.1/)
       end
 
-      [ Float::NAN, Float::INFINITY, -Float::INFINITY ].each do |value|
-        it "rejects #{value} because JSON stores it as null" do
-          expect { described_class.serialize({ score: value }) }
-            .to raise_error(Strata::Events::Payload::InvalidPayloadError, /score/)
-        end
-      end
-
-      [ 1.0e16, -1.0e16, 1.0e20 ].each do |value|
-        it "rejects #{value} because jsonb returns it as an integer, and suggests an integer or string" do
+      [ 1.5, 1.0e15, Float::NAN ].each do |value|
+        it "rejects the float #{value}, which jsonb cannot return reliably, and suggests an integer or string" do
           expect { described_class.serialize({ meta: { total: value } }) }
             .to raise_error(Strata::Events::Payload::InvalidPayloadError, /meta\.total.*integer or a string/)
         end
@@ -171,8 +163,8 @@ RSpec.describe Strata::Events::Payload do
         .to eq({ case_id: 'abc', nested: { task_id: 'def' }, list: [ { id: 1 } ] })
     end
 
-    it 'preserves strings, numbers, booleans, and nil' do
-      payload = { s: 'text', i: 42, f: 1.5, t: true, n: nil }
+    it 'preserves strings, integers, booleans, and nil' do
+      payload = { s: 'text', i: 42, t: true, n: nil }
 
       expect(round_trip(payload)).to eq(payload)
     end

@@ -3,17 +3,17 @@
 module Strata
   module Events
     # PayloadType is the attribute type for stored event payloads. It runs
-    # assigned payloads through {Payload.serialize} before jsonb converts them
-    # to JSON, so a record or Ruby time can't slip into stored JSON. Rails
-    # casts lazily, so a bad payload raises when it is first read or saved.
-    # Payloads read from the database are not checked again.
+    # payloads through {Payload.serialize} whenever Rails converts them for the
+    # database, so assigned payloads, payloads changed in place, and query
+    # values all follow the payload contract. A bad payload raises
+    # {Payload::InvalidPayloadError} before it is saved.
     #
     # @example
     #   attribute :payload, Strata::Events::PayloadType.new
     #
     class PayloadType < ActiveRecord::Type::Json
-      # @raise [Payload::InvalidPayloadError] for payloads that break the payload contract
-      def cast(value)
+      # Rails' JSON cast also goes through serialize, so this covers assignment too.
+      def serialize(value)
         super(Payload.serialize(value))
       end
     end

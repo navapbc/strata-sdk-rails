@@ -130,9 +130,9 @@ unrelated case updates.
 > models. Nothing writes to them yet, and the install generator is not yet
 > available. Events are read-only once saved, like `Strata::AuditLine`, and
 > record an optional polymorphic publisher. The `Strata::Events::PayloadType`
-> attribute type runs every assigned payload through
-> `Strata::Events::Payload.serialize`, so a payload that breaks the contract
-> raises `InvalidPayloadError` before it is saved. Deliveries store only the
+> attribute type runs every payload through `Strata::Events::Payload.serialize`
+> when it is written, including payloads changed in place, so a payload that
+> breaks the contract raises `InvalidPayloadError` before it is saved. Deliveries store only the
 > last error's class name in `error_class`, because error messages can contain
 > personal data; full errors go to logs and `Rails.error`. The design
 > keeps one current step per case; parallel steps within a case are not
@@ -149,15 +149,14 @@ tampered payload row cannot make a worker load arbitrary code.
 Rules:
 
 - Payloads contain identifiers, not records, record attributes, or PII.
-- Allowed values are strings, integers, finite floats below 1e16, booleans,
-  `nil`, times, dates, and hashes and arrays of those. Keys are strings or
-  symbols. Larger floats are rejected because jsonb returns them as integers.
+- Allowed values are strings, integers, booleans, `nil`, times, dates, and
+  hashes and arrays of those. Keys are strings or symbols.
 - Times are stored as ISO 8601 UTC strings with microseconds, so equal
   instants always store identical strings. Dates are stored as ISO 8601 date
   strings. Both come back as strings; handlers parse them when needed.
 - Every other value is rejected, including symbols (which would come back as
-  strings), `BigDecimal` (publish integer cents or a string), records, NaN
-  and Infinity, strings that are not
+  strings), floats and `BigDecimal` (publish integer cents or a string;
+  jsonb returns some floats as integers), records, strings that are not
   valid UTF-8 or contain NUL bytes, and hashes whose keys would collide once
   stringified. The error names the path to the bad value.
 - String keys come back as symbols, so `{ "case_id" => id }` is read as

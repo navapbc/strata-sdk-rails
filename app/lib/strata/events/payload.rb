@@ -6,8 +6,8 @@ module Strata
     # stored and delivered later.
     #
     # Payloads contain identifiers, not records, record attributes, or PII.
-    # serialize raises unless a payload is a hash of strings, integers, finite
-    # floats below 1e16, booleans, nil, times, dates, and nested hashes and arrays of those.
+    # serialize raises unless a payload is a hash of strings, integers,
+    # booleans, nil, times, dates, and nested hashes and arrays of those.
     # Times are stored as ISO 8601 UTC strings and dates as ISO 8601 date
     # strings; both come back as strings.
     # deserialize returns the stored JSON with symbol keys; it never loads a
@@ -27,9 +27,6 @@ module Strata
       # Raised when stored payload data is not a hash, which means the stored
       # row is corrupt rather than that a publisher sent a bad payload.
       class CorruptPayloadError < StandardError; end
-
-      # Ruby writes floats this large in exponent form, and jsonb returns them as integers.
-      FLOAT_LIMIT = 1.0e16
 
       class << self
         # @param [Hash] payload The event payload
@@ -61,14 +58,9 @@ module Strata
           when nil, true, false, Integer
             value
           when Float
-            raise InvalidPayloadError, "Event payload value at #{path_label(path)} must be finite" unless value.finite?
-            if value.abs >= FLOAT_LIMIT
-              raise InvalidPayloadError,
-                "Event payload value at #{path_label(path)} is too large a float to store unchanged; " \
-                "publish an integer or a string instead"
-            end
-
-            value
+            raise InvalidPayloadError,
+              "Event payload value at #{path_label(path)} is a Float, which jsonb cannot return reliably; " \
+              "publish an integer or a string instead"
           when String
             json_string(value) || raise(InvalidPayloadError,
               "Event payload string at #{path_label(path)} must be valid UTF-8 without NUL bytes")

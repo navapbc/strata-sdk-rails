@@ -28,10 +28,11 @@ RSpec.describe Strata::Event do
       expect(described_class.new.payload).to eq({})
     end
 
-    it 'reloads the largest allowed floats as floats' do
-      payload = { 'large' => 9.9e15, 'small' => 1.0e-5 }
+    it 'reloads large integers exactly, as integers' do
+      reloaded = create(:strata_event, payload: { 'big' => 2**70 }).reload.payload['big']
 
-      expect(create(:strata_event, payload: payload).reload.payload).to eq(payload)
+      expect(reloaded).to eq(2**70)
+      expect(reloaded).to be_an(Integer)
     end
 
     it 'stores the payload as Strata::Events::Payload.serialize returns it' do
@@ -50,6 +51,13 @@ RSpec.describe Strata::Event do
     it 'rejects a payload that breaks the payload contract before saving it' do
       expect { create(:strata_event, payload: { kase: TestCase.new }) }
         .to raise_error(Strata::Events::Payload::InvalidPayloadError, /publish its id instead/)
+    end
+
+    it 'rejects a payload changed in place to break the contract before saving it' do
+      event = build(:strata_event)
+      event.payload['state'] = :approved
+
+      expect { event.save! }.to raise_error(Strata::Events::Payload::InvalidPayloadError, /state/)
     end
   end
 
