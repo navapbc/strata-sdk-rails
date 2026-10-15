@@ -95,7 +95,7 @@ Stores one row per `(event, subscriber)` with:
 - attempt count;
 - `next_attempt_at`;
 - `enqueued_at`;
-- last error;
+- class name of the last error (never its message, which can contain PII);
 - completion time.
 
 Delivery statuses are:
@@ -132,8 +132,9 @@ unrelated case updates.
 > record an optional polymorphic publisher. The `Strata::Events::PayloadType`
 > attribute type runs every assigned payload through
 > `Strata::Events::Payload.serialize`, so a payload that breaks the contract
-> raises `InvalidPayloadError` before it is saved. `last_error` keeps at most
-> 1,000 characters because error messages can contain personal data. The design
+> raises `InvalidPayloadError` before it is saved. Deliveries store only the
+> last error's class name in `error_class`, because error messages can contain
+> personal data; full errors go to logs and `Rails.error`. The design
 > keeps one current step per case; parallel steps within a case are not
 > planned.
 
@@ -262,7 +263,7 @@ errors. The delivery row is the durable schedule for every attempt:
 1. A newly published delivery is `pending`, with `next_attempt_at` set to the
    publication time and `enqueued_at` set to `nil`.
 2. If a handler raises, its work rolls back. In a separate transaction, the
-   job records the failed attempt and error. When attempts remain, it sets
+   job records the failed attempt and the error's class name. When attempts remain, it sets
    `status = failed`, calculates the backoff in `next_attempt_at`, and clears
    `enqueued_at` before committing. When attempts are exhausted or the step is
    not retryable, it records `dead` and clears `next_attempt_at`.
@@ -499,7 +500,7 @@ before upgrading.
 - **Given** a handler raises on every attempt
 - **When** it reaches `max_attempts`
 - **Then** its database changes are rolled back and the delivery becomes `dead`
-  with the error and attempt count recorded.
+  with the error's class name and attempt count recorded.
 
 ### Duplicate execution does not reapply completed work
 

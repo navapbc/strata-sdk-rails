@@ -95,7 +95,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_14_163827) do
     t.integer "attempts", default: 0, null: false
     t.datetime "next_attempt_at"
     t.datetime "enqueued_at"
-    t.text "last_error"
+    t.string "error_class"
     t.datetime "completed_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false

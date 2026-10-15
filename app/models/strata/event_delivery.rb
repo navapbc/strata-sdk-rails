@@ -2,21 +2,17 @@
 
 module Strata
   # EventDelivery tracks delivering one {Strata::Event} to one durable
-  # subscriber: its status, attempts, retry schedule, and latest error.
+  # subscriber: its status, attempts, retry schedule, and the class name of its
+  # latest error. Error messages are not stored because they can contain PII.
   #
   # See docs/specs/durable-events/spec.md#strata_event_deliveries.
   class EventDelivery < ApplicationRecord
     self.table_name = "strata_event_deliveries"
 
-    # Error messages can contain personal data, so only a bounded prefix is kept.
-    LAST_ERROR_LIMIT = 1_000
-
     belongs_to :event, class_name: "Strata::Event", inverse_of: :deliveries
 
     # The sweep index's partial condition lists the pending and failed values.
     enum :status, { pending: 0, succeeded: 1, failed: 2, no_match: 3, dead: 4 }, validate: true
-
-    normalizes :last_error, with: ->(error) { error.truncate(LAST_ERROR_LIMIT) }
 
     # One delivery per subscriber for an event is enforced by a unique index.
     validates :subscriber, presence: true

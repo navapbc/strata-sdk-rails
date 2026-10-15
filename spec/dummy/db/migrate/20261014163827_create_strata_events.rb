@@ -31,7 +31,8 @@ class CreateStrataEvents < ActiveRecord::Migration[7.2]
       t.integer  :attempts, null: false, default: 0
       t.datetime :next_attempt_at
       t.datetime :enqueued_at
-      t.text     :last_error
+      # Class name only: error messages can contain PII
+      t.string   :error_class
       t.datetime :completed_at
 
       t.timestamps

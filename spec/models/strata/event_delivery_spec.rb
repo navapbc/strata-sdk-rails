@@ -6,7 +6,7 @@ RSpec.describe Strata::EventDelivery do
   describe 'defaults' do
     it 'starts pending with no attempts, schedule, enqueue, error, or completion' do
       expect(create(:strata_event_delivery)).to have_attributes(
-        status: 'pending', attempts: 0, next_attempt_at: nil, enqueued_at: nil, last_error: nil, completed_at: nil
+        status: 'pending', attempts: 0, next_attempt_at: nil, enqueued_at: nil, error_class: nil, completed_at: nil
       )
     end
   end
@@ -69,14 +69,6 @@ RSpec.describe Strata::EventDelivery do
       existing = create(:strata_event_delivery)
 
       expect(build(:strata_event_delivery, subscriber: existing.subscriber)).to be_valid
-    end
-  end
-
-  describe 'last_error' do
-    it 'truncates errors longer than the limit' do
-      delivery = create(:strata_event_delivery, last_error: 'x' * 5_000)
-
-      expect(delivery.reload.last_error.length).to eq(described_class::LAST_ERROR_LIMIT)
     end
   end
 
