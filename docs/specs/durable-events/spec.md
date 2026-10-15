@@ -127,10 +127,10 @@ unlike Rails' general `lock_version`, it does not change the behavior of
 unrelated case updates.
 
 > **Implemented**: the `strata_events` and `strata_event_deliveries` tables
-> (dummy app migration) and the `Strata::Event` and `Strata::EventDelivery`
-> models. Nothing writes to them yet, and the install generator is not yet
-> available. Events are read-only once saved, like `Strata::AuditLine`, and
-> record an optional polymorphic publisher. The `Strata::Events::PayloadType`
+> (dummy app migration), the `Strata::Event` and `Strata::EventDelivery`
+> models, and `rails generate strata:events` to install the migration in host
+> apps. Nothing writes to the tables yet. Events are read-only once saved,
+> like `Strata::AuditLine`, and record an optional polymorphic publisher. The `Strata::Events::PayloadType`
 > attribute type runs every payload through `Strata::Events::Payload.serialize`
 > when it is written, including payloads changed in place, so a payload that
 > breaks the contract raises `InvalidPayloadError` before it is saved. Deliveries store only the
@@ -458,6 +458,7 @@ before upgrading.
 | Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | Done |
 | Payload serialization (`Strata::Events::Payload`) | 2 | Done |
 | Event and delivery tables and models (`Strata::Event`, `Strata::EventDelivery`) | 2 | In review |
+| Install generator (`rails generate strata:events`) | 2 | In review |
 | Publish writes event and delivery rows | 2 | Not started |
 | Durable ActiveJob delivery | 3 | Not started |
 

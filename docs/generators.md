@@ -85,6 +85,14 @@ Creates a standard set of files required for implementing a staff dashboard in a
 bin/rails generate strata:staff
 ```
 
+### strata:events
+
+Installs the migration for the durable events tables (`strata_events` and `strata_event_deliveries`). The engine ships the `Strata::Event` and `Strata::EventDelivery` models. [See full usage guide](../lib/generators/strata/events/USAGE)
+
+```bash
+bin/rails generate strata:events
+```
+
 ## Generator Dependencies
 
 - When generating a case, the generator will check for the existence of associated business process and application form classes
