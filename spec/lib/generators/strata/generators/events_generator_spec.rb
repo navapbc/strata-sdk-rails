@@ -93,6 +93,29 @@ RSpec.describe Strata::Generators::EventsGenerator, type: :generator do
       expect(generator).to have_received(:say).with(/strata_events table does not exist/, :yellow)
     end
 
+    [ ActiveRecord::NoDatabaseError, ActiveRecord::ConnectionNotEstablished ].each do |error|
+      context "when the database is not reachable (#{error.name.demodulize})" do
+        before do
+          allow(ActiveRecord::Base.connection).to receive(:table_exists?).with(:strata_events).and_raise(error)
+          allow(generator).to receive(:yes?)
+          allow(generator).to receive(:say)
+        end
+
+        it 'still installs the migration' do
+          generator.invoke_all
+
+          expect(generated_migration).to be_present
+        end
+
+        it 'warns that the database must be created and migrated, without offering to migrate' do
+          generator.invoke_all
+
+          expect(generator).to have_received(:say).with(/could not connect to the database.*db:create.*db:migrate/i, :yellow)
+          expect(generator).not_to have_received(:yes?)
+        end
+      end
+    end
+
     it 'skips the table check when --skip-migration-check is set' do
       allow(ActiveRecord::Base.connection).to receive(:table_exists?)
 

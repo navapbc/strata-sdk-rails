@@ -35,6 +35,10 @@ module Strata
         else
           say "You may need to run 'bin/rails db:migrate' before using durable events.", :yellow
         end
+      rescue ActiveRecord::NoDatabaseError, ActiveRecord::ConnectionNotEstablished
+        # The migration is already written; db:migrate can't run until the database exists.
+        say "Warning: could not connect to the database. " \
+            "Run 'bin/rails db:create db:migrate' before using durable events.", :yellow
       end
     end
   end
