@@ -70,15 +70,6 @@ module Strata
 
         input_el = super(attribute, field_options)
         if prefix || suffix
-          # Rails wraps error-state inputs in <div class="field_with_errors">, which
-          # would sit between the prefix and the input, breaking the
-          # .usa-input-prefix + input CSS adjacency selector that supplies the
-          # input's padding-left. Strip the wrapper only here; Strata renders its
-          # own error markers (usa-input--error, usa-form-group--error, the
-          # usa-error-message span) so nothing visual is lost.
-          if has_error?(attribute)
-            input_el = input_el.to_s.sub(%r{\A<div class="field_with_errors">(.*)</div>\z}m, '\1').html_safe
-          end
           group_class = us_input_group_class(error: has_error?(attribute), width: options[:width])
           input_el = @template.content_tag(:div, class: group_class) do
             @template.safe_join([

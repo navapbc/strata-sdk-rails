@@ -14,6 +14,8 @@ RSpec.describe Strata::FormBuilder do
       attribute :has_employer, :string
       attribute :leave_type, :string
       attribute :income, :string    # for prefix/suffix tests
+      attribute :agree_to_terms, :boolean  # for check_box error tests
+      attribute :nice_choice, :string      # for radio_button error tests
     end
 
     stub_const("TestForm", test_form_class)
@@ -76,6 +78,14 @@ RSpec.describe Strata::FormBuilder do
       it 'outputs an error message' do
         expect(result).to have_element(:div, class: 'usa-form-group--error')
         expect(result).to have_element(:span, text: 'is invalid', class: 'usa-error-message')
+      end
+
+      it 'does not wrap the input in field_with_errors' do
+        expect(result).not_to have_css('.field_with_errors')
+      end
+
+      it 'still marks the input itself with usa-input--error' do
+        expect(result).to have_element(:input, class: 'usa-input usa-input--error')
       end
     end
 
@@ -193,14 +203,6 @@ RSpec.describe Strata::FormBuilder do
 
       it 'adds the error modifier to the input-group, not just the input' do
         expect(result).to have_element(:div, class: 'usa-input-group usa-input-group--error')
-      end
-
-      it 'keeps the input as the immediate sibling of the prefix in error states' do
-        # USWDS uses .usa-input-prefix + input (adjacent-sibling selector) to apply
-        # padding-left so the input value doesn't sit on top of the prefix. Anything
-        # that lands between them (e.g. Rails' default field_with_errors wrap) would
-        # break that adjacency.
-        expect(result).to have_css('.usa-input-prefix + input')
       end
     end
 
@@ -331,6 +333,10 @@ RSpec.describe Strata::FormBuilder do
         expect(result).to have_element(:select, class: 'usa-select usa-input--error')
         expect(result).to have_element(:span, text: 'is invalid', class: 'usa-error-message')
       end
+
+      it 'does not wrap the select in field_with_errors' do
+        expect(result).not_to have_css('.field_with_errors')
+      end
     end
   end
 
@@ -407,6 +413,18 @@ RSpec.describe Strata::FormBuilder do
       end
     end
 
+    context 'with an error' do
+      let(:result) { builder.check_box(:agree_to_terms) }
+
+      before do
+        object.errors.add(:agree_to_terms, 'is invalid')
+      end
+
+      it 'does not wrap the checkbox in field_with_errors' do
+        expect(result).not_to have_css('.field_with_errors')
+      end
+    end
+
     context 'with multi-value checkboxes' do
       let(:result) { builder.check_box(:first_name, { label: "123" }, "val_123") }
 
@@ -442,6 +460,18 @@ RSpec.describe Strata::FormBuilder do
       it 'outputs a radio button without the tile class' do
         expect(result).to have_element(:input, type: 'radio', class: 'usa-radio__input')
         expect(result).not_to have_element(:input, type: 'radio', class: 'usa-radio__input--tile')
+      end
+    end
+
+    context 'with an error' do
+      let(:result) { builder.radio_button(:nice_choice, 'yes') }
+
+      before do
+        object.errors.add(:nice_choice, 'is invalid')
+      end
+
+      it 'does not wrap the radio button in field_with_errors' do
+        expect(result).not_to have_css('.field_with_errors')
       end
     end
   end
