@@ -8,17 +8,18 @@ class CreateStrataEvents < ActiveRecord::Migration[7.2]
       # Plain JSON produced by Strata::Events::Payload.serialize
       t.jsonb :payload, null: false, default: {}
 
-      # Optional polymorphic publisher (the record that published the event)
-      t.references :publisher, polymorphic: true, type: :uuid
+      # Optional polymorphic publisher (the record that published the event).
+      # Not indexed: no planned query looks events up by publisher.
+      t.references :publisher, polymorphic: true, type: :uuid, index: false
 
-      t.datetime :published_at, null: false
-
-      # Events are immutable: created_at only, no updated_at
+      # Events are immutable: created_at (the publication time) only, no updated_at
       t.datetime :created_at, null: false
     end
 
-    add_index :strata_events, [ :name, :published_at ]
-    add_index :strata_events, :published_at
+    # Serves strata:events:replay_dead[event_name]
+    add_index :strata_events, [ :name, :created_at ]
+    # Serves strata:events:prune[days]
+    add_index :strata_events, :created_at
 
     create_table :strata_event_deliveries, id: :uuid, default: -> { "gen_random_uuid()" } do |t|
       t.references :event, type: :uuid, null: false, index: false,
