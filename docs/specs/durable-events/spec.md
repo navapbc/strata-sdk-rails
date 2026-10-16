@@ -84,7 +84,8 @@ before `after_initialize` registrations run and must not be changed at runtime.
 ### `strata_events`
 
 Stores the event name, serialized payload, optional publisher identity, and
-publication timestamp.
+publication timestamp (`created_at`, since the row is inserted when the event
+is published).
 
 ### `strata_event_deliveries`
 
@@ -95,7 +96,7 @@ Stores one row per `(event, subscriber)` with:
 - attempt count;
 - `next_attempt_at`;
 - `enqueued_at`;
-- last error;
+- class name of the last error (never its message, which can contain PII);
 - completion time.
 
 Delivery statuses are:
@@ -110,8 +111,9 @@ Delivery statuses are:
 
 A unique database index prevents duplicate rows for the same event and
 subscriber. The event foreign key uses `ON DELETE CASCADE` so pruning an event
-also removes its deliveries. An index covering status, `next_attempt_at`, and
-`enqueued_at` supports the stranded-attempt sweeper.
+also removes its deliveries. A partial index on `next_attempt_at` covering
+unenqueued `pending` and `failed` deliveries supports the stranded-attempt
+sweeper.
 
 Targets are deliberately not stored on delivery rows. Cases are resolved once,
 inside the handler at delivery time. This avoids duplicate routing, supports
@@ -124,6 +126,19 @@ with every step transition and is used only for durable-event concurrency;
 unlike Rails' general `lock_version`, it does not change the behavior of
 unrelated case updates.
 
+> **Implemented**: the `strata_events` and `strata_event_deliveries` tables
+> (dummy app migration) and the `Strata::Event` and `Strata::EventDelivery`
+> models. Nothing writes to them yet, and the install generator is not yet
+> available. Events are read-only once saved, like `Strata::AuditLine`, and
+> record an optional polymorphic publisher. The `Strata::Events::PayloadType`
+> attribute type runs every payload through `Strata::Events::Payload.serialize`
+> when it is written, including payloads changed in place, so a payload that
+> breaks the contract raises `InvalidPayloadError` before it is saved. Deliveries store only the
+> last error's class name in `error_class`, because error messages can contain
+> personal data; full errors go to logs and `Rails.error`. The design
+> keeps one current step per case; parallel steps within a case are not
+> planned.
+
 ## Payload contract
 
 Payloads are stored as plain JSON. `Strata::Events::Payload.serialize`
@@ -135,14 +150,14 @@ tampered payload row cannot make a worker load arbitrary code.
 Rules:
 
 - Payloads contain identifiers, not records, record attributes, or PII.
-- Allowed values are strings, integers, finite floats, booleans, `nil`,
-  times, dates, and hashes and arrays of those. Keys are strings or symbols.
+- Allowed values are strings, integers, booleans, `nil`, times, dates, and
+  hashes and arrays of those. Keys are strings or symbols.
 - Times are stored as ISO 8601 UTC strings with microseconds, so equal
   instants always store identical strings. Dates are stored as ISO 8601 date
   strings. Both come back as strings; handlers parse them when needed.
 - Every other value is rejected, including symbols (which would come back as
-  strings), `BigDecimal` (publish integer cents or a string), records, NaN
-  and Infinity, strings that are not
+  strings), floats and `BigDecimal` (publish integer cents or a string;
+  jsonb returns some floats as integers), records, strings that are not
   valid UTF-8 or contain NUL bytes, and hashes whose keys would collide once
   stringified. The error names the path to the bad value.
 - String keys come back as symbols, so `{ "case_id" => id }` is read as
@@ -248,7 +263,7 @@ errors. The delivery row is the durable schedule for every attempt:
 1. A newly published delivery is `pending`, with `next_attempt_at` set to the
    publication time and `enqueued_at` set to `nil`.
 2. If a handler raises, its work rolls back. In a separate transaction, the
-   job records the failed attempt and error. When attempts remain, it sets
+   job records the failed attempt and the error's class name. When attempts remain, it sets
    `status = failed`, calculates the backoff in `next_attempt_at`, and clears
    `enqueued_at` before committing. When attempts are exhausted or the step is
    not retryable, it records `dead` and clears `next_attempt_at`.
@@ -441,8 +456,9 @@ before upgrading.
 | Handler outcome contract: transitions return `:transitioned` or `:no_match` | 1 | Done |
 | Per-case structured outcome log | 1 | Done |
 | Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | Done |
-| Payload serialization (`Strata::Events::Payload`) | 2 | In review |
-| Event and delivery persistence | 2 | Not started |
+| Payload serialization (`Strata::Events::Payload`) | 2 | Done |
+| Event and delivery tables and models (`Strata::Event`, `Strata::EventDelivery`) | 2 | In review |
+| Publish writes event and delivery rows | 2 | Not started |
 | Durable ActiveJob delivery | 3 | Not started |
 
 ## Host upgrade checklist
@@ -484,7 +500,7 @@ before upgrading.
 - **Given** a handler raises on every attempt
 - **When** it reaches `max_attempts`
 - **Then** its database changes are rolled back and the delivery becomes `dead`
-  with the error and attempt count recorded.
+  with the error's class name and attempt count recorded.
 
 ### Duplicate execution does not reapply completed work
 
@@ -584,9 +600,8 @@ before upgrading.
 - **Then** registration fails with a clear message explaining how to use a
   named method.
 
-## Resolved decisions and remaining risks
+## Resolved decisions
 
-Resolved:
 
 1. **Retention is host-configured.** The SDK mandates no retention period.
    `Strata::Events.retention_period` defaults to `nil`, and each host must set
@@ -627,18 +642,14 @@ Resolved:
    and then returns to the same named step. The migration generator must cover
    new case tables, and existing hosts must add the field before enabling
    durability.
+10. **One current step per case.** A case stores a single
+    `business_process_current_step`, and the transition version, conditional
+    updates, and per-subscriber delivery all build on that. Parallel steps
+    within one case are not planned. Supporting them would need the current
+    step and transition version tracked per branch, and deliveries that fan out
+    per branch so each branch retries and completes on its own.
 
-Remaining risks:
-
-1. **The design assumes one current step per case.** A case stores a single
-   `business_process_current_step`, and the transition version, conditional
-   updates, and per-subscriber delivery all build on that. Parallel steps
-   within one case would need the current step and transition version tracked
-   per branch, and deliveries that fan out per branch so each branch retries
-   and completes on its own; otherwise branches of one case would contend on
-   the case-level version and a failed branch would roll back the others.
-   Decide whether parallel steps are planned before Phase 2 creates the
-   delivery tables.
+No risks remain open.
 
 ## Explicitly out of scope
 

@@ -6,8 +6,8 @@ module Strata
     # stored and delivered later.
     #
     # Payloads contain identifiers, not records, record attributes, or PII.
-    # serialize raises unless a payload is a hash of strings, integers, finite
-    # floats, booleans, nil, times, dates, and nested hashes and arrays of those.
+    # serialize raises unless a payload is a hash of strings, integers,
+    # booleans, nil, times, dates, and nested hashes and arrays of those.
     # Times are stored as ISO 8601 UTC strings and dates as ISO 8601 date
     # strings; both come back as strings.
     # deserialize returns the stored JSON with symbol keys; it never loads a
@@ -58,15 +58,15 @@ module Strata
           when nil, true, false, Integer
             value
           when Float
-            raise InvalidPayloadError, "Event payload value at #{path_label(path)} must be finite" unless value.finite?
-
-            value
+            raise InvalidPayloadError,
+              "Event payload value at #{path_label(path)} is a Float, which jsonb cannot return reliably; " \
+              "publish an integer or a string instead"
           when String
             json_string(value) || raise(InvalidPayloadError,
               "Event payload string at #{path_label(path)} must be valid UTF-8 without NUL bytes")
           when ActiveSupport::TimeWithZone, Time, DateTime
             # Normalize to UTC so equal instants always store identical strings.
-            value.to_time.utc.iso8601(6)
+            value.to_time.getutc.iso8601(6)
           when Date
             value.iso8601
           when BigDecimal
@@ -79,7 +79,7 @@ module Strata
           else
             raise InvalidPayloadError,
               "Event payload value at #{path_label(path)} is a #{value.class}; payloads may only contain " \
-              "strings, numbers, booleans, nil, times, dates, hashes, and arrays"
+              "strings, integers, booleans, nil, times, dates, hashes, and arrays"
           end
         end
 

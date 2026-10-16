@@ -22,7 +22,7 @@ RSpec.describe Strata::Events::Payload do
     end
 
     describe 'allowed values' do
-      [ nil, true, false, 'text', 42, 1.5 ].each do |value|
+      [ nil, true, false, 'text', 42, 2**70 ].each do |value|
         it "allows #{value.inspect}" do
           expect(described_class.serialize({ value: value })).to eq({ 'value' => value })
         end
@@ -54,6 +54,22 @@ RSpec.describe Strata::Events::Payload do
 
         expect(described_class.serialize(payload))
           .to eq({ 'a' => '2026-10-13T01:02:03.000000Z', 'b' => '2026-10-13T01:02:03.000000Z' })
+      end
+
+      it "leaves the publisher's times in their original zone" do
+        time = Time.new(2026, 10, 13, 3, 2, 3, '+02:00')
+        time_with_zone = Time.use_zone('America/New_York') { Time.zone.parse('2026-10-13 06:30:00') }
+
+        described_class.serialize({ a: time, b: time_with_zone })
+
+        expect(time.utc_offset).to eq(2 * 3600)
+        expect(time_with_zone.to_time.utc_offset).to eq(-4 * 3600)
+      end
+
+      it 'stores frozen times' do
+        time = Time.new(2026, 10, 13, 3, 2, 3, '+02:00').freeze
+
+        expect(described_class.serialize({ at: time })).to eq({ 'at' => '2026-10-13T01:02:03.000000Z' })
       end
 
       it 'stores dates as ISO 8601 date strings' do
@@ -94,10 +110,10 @@ RSpec.describe Strata::Events::Payload do
           .to raise_error(Strata::Events::Payload::InvalidPayloadError, /items\.1/)
       end
 
-      [ Float::NAN, Float::INFINITY, -Float::INFINITY ].each do |value|
-        it "rejects #{value} because JSON stores it as null" do
-          expect { described_class.serialize({ score: value }) }
-            .to raise_error(Strata::Events::Payload::InvalidPayloadError, /score/)
+      [ 1.5, 1.0e15, Float::NAN ].each do |value|
+        it "rejects the float #{value}, which jsonb cannot return reliably, and suggests an integer or string" do
+          expect { described_class.serialize({ meta: { total: value } }) }
+            .to raise_error(Strata::Events::Payload::InvalidPayloadError, /meta\.total.*integer or a string/)
         end
       end
 
@@ -147,8 +163,8 @@ RSpec.describe Strata::Events::Payload do
         .to eq({ case_id: 'abc', nested: { task_id: 'def' }, list: [ { id: 1 } ] })
     end
 
-    it 'preserves strings, numbers, booleans, and nil' do
-      payload = { s: 'text', i: 42, f: 1.5, t: true, n: nil }
+    it 'preserves strings, integers, booleans, and nil' do
+      payload = { s: 'text', i: 42, t: true, n: nil }
 
       expect(round_trip(payload)).to eq(payload)
     end
