@@ -1,0 +1,15 @@
+Description:
+    Installs the strata_events and strata_event_deliveries migration into the
+    host application. The Strata::Event and Strata::EventDelivery models are
+    shipped by the engine directly — only the migration is copied.
+
+    See docs/specs/durable-events/spec.md for the durable events design.
+
+Usage:
+    bin/rails generate strata:events
+
+This will create:
+    - db/migrate/<timestamp>_create_strata_events.rb
+
+Options:
+    --skip-migration-check         Skip checking if strata_events table exists
