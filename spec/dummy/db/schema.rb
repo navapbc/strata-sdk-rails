@@ -111,6 +111,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_10_14_163827) do
     t.datetime "created_at", null: false
     t.index ["created_at"], name: "index_strata_events_on_created_at"
     t.index ["name", "created_at"], name: "index_strata_events_on_name_and_created_at"
+    t.index ["publisher_type", "publisher_id"], name: "index_strata_events_on_publisher"
   end
 
   create_table "strata_tasks", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
