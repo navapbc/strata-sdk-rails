@@ -84,7 +84,8 @@ before `after_initialize` registrations run and must not be changed at runtime.
 ### `strata_events`
 
 Stores the event name, serialized payload, optional publisher identity, and
-publication timestamp.
+publication timestamp (`created_at`, since the row is inserted when the event
+is published).
 
 ### `strata_event_deliveries`
 
@@ -599,9 +600,8 @@ before upgrading.
 - **Then** registration fails with a clear message explaining how to use a
   named method.
 
-## Resolved decisions and remaining risks
+## Resolved decisions
 
-Resolved:
 
 1. **Retention is host-configured.** The SDK mandates no retention period.
    `Strata::Events.retention_period` defaults to `nil`, and each host must set
@@ -642,18 +642,14 @@ Resolved:
    and then returns to the same named step. The migration generator must cover
    new case tables, and existing hosts must add the field before enabling
    durability.
+10. **One current step per case.** A case stores a single
+    `business_process_current_step`, and the transition version, conditional
+    updates, and per-subscriber delivery all build on that. Parallel steps
+    within one case are not planned. Supporting them would need the current
+    step and transition version tracked per branch, and deliveries that fan out
+    per branch so each branch retries and completes on its own.
 
-Remaining risks:
-
-1. **The design assumes one current step per case.** A case stores a single
-   `business_process_current_step`, and the transition version, conditional
-   updates, and per-subscriber delivery all build on that. Parallel steps
-   within one case would need the current step and transition version tracked
-   per branch, and deliveries that fan out per branch so each branch retries
-   and completes on its own; otherwise branches of one case would contend on
-   the case-level version and a failed branch would roll back the others.
-   Decide whether parallel steps are planned before Phase 2 creates the
-   delivery tables.
+No risks remain open.
 
 ## Explicitly out of scope
 

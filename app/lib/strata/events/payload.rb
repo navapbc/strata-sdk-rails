@@ -79,7 +79,7 @@ module Strata
           else
             raise InvalidPayloadError,
               "Event payload value at #{path_label(path)} is a #{value.class}; payloads may only contain " \
-              "strings, numbers, booleans, nil, times, dates, hashes, and arrays"
+              "strings, integers, booleans, nil, times, dates, hashes, and arrays"
           end
         end
 

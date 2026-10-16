@@ -20,7 +20,6 @@ module Strata
     attribute :payload, Strata::Events::PayloadType.new
 
     validates :name, presence: true
-    validates :published_at, presence: true
 
     def readonly?
       persisted?

@@ -4,7 +4,7 @@ require 'rails_helper'
 
 RSpec.describe Strata::Event do
   describe 'validations' do
-    it 'is valid with a name and publication time' do
+    it 'is valid with a name' do
       expect(build(:strata_event)).to be_valid
     end
 
@@ -13,13 +13,6 @@ RSpec.describe Strata::Event do
 
       expect(event).not_to be_valid
       expect(event.errors[:name]).to be_present
-    end
-
-    it 'requires a publication time' do
-      event = build(:strata_event, published_at: nil)
-
-      expect(event).not_to be_valid
-      expect(event.errors[:published_at]).to be_present
     end
   end
 
@@ -76,12 +69,15 @@ RSpec.describe Strata::Event do
   end
 
   describe 'deliveries' do
-    it 'lists the deliveries for the event' do
-      event = create(:strata_event)
-      first = create(:strata_event_delivery, event: event, subscriber: 'FirstProcess.handle_event')
-      second = create(:strata_event_delivery, event: event, subscriber: 'SecondProcess.handle_event')
+    it 'saves a new event together with its deliveries, as publishing will' do
+      event = build(:strata_event)
+      event.deliveries.build(subscriber: 'FirstProcess.handle_event')
+      event.deliveries.build(subscriber: 'SecondProcess.handle_event')
 
-      expect(event.deliveries).to contain_exactly(first, second)
+      event.save!
+
+      expect(described_class.find(event.id).deliveries.map(&:subscriber))
+        .to contain_exactly('FirstProcess.handle_event', 'SecondProcess.handle_event')
     end
   end
 

@@ -4,7 +4,6 @@ FactoryBot.define do
   factory :strata_event, class: 'Strata::Event' do
     name { 'TestEventHappened' }
     payload { { 'case_id' => SecureRandom.uuid } }
-    published_at { Time.current }
   end
 
   factory :strata_event_delivery, class: 'Strata::EventDelivery' do
