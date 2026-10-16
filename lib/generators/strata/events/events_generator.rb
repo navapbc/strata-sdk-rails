@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails/generators"
+require "rails/generators/active_record"
 
 module Strata
   module Generators
@@ -13,14 +14,15 @@ module Strata
     # @example Install the durable events migration
     #   rails generate strata:events
     class EventsGenerator < Rails::Generators::Base
+      include ActiveRecord::Generators::Migration
+
       source_root File.expand_path("templates", __dir__)
 
       class_option :"skip-migration-check", type: :boolean, default: false,
                                             desc: "Skip checking if strata_events table exists"
 
       def create_migration_file
-        timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
-        template "create_strata_events.rb.tt", "db/migrate/#{timestamp}_create_strata_events.rb"
+        migration_template "create_strata_events.rb.tt", File.join(db_migrate_path, "create_strata_events.rb")
       end
 
       def check_strata_events_table

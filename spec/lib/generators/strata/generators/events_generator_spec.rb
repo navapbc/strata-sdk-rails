@@ -35,6 +35,53 @@ RSpec.describe Strata::Generators::EventsGenerator, type: :generator do
     end
   end
 
+  describe 'running the generator again' do
+    include ActiveSupport::Testing::TimeHelpers
+
+    before do
+      allow(ActiveRecord::Base.connection).to receive(:table_exists?).with(:strata_events).and_return(true)
+    end
+
+    def migrations
+      Dir.glob("#{destination_root}/db/migrate/*_create_strata_events.rb")
+    end
+
+    def run_generator(options = {})
+      described_class.new([], { quiet: true }.merge(options), destination_root: destination_root).invoke_all
+    end
+
+    it 'does not create a second migration when the events migration is already installed' do
+      travel_to(Time.utc(2026, 10, 16, 12, 0, 0)) { run_generator }
+      travel_to(Time.utc(2026, 10, 17, 12, 0, 0)) { run_generator }
+
+      expect(migrations.size).to eq(1)
+    end
+
+    it 'keeps the originally installed migration' do
+      travel_to(Time.utc(2026, 10, 16, 12, 0, 0)) { run_generator }
+      original = migrations.first
+      travel_to(Time.utc(2026, 10, 17, 12, 0, 0)) { run_generator }
+
+      expect(migrations).to eq([ original ])
+    end
+
+    it 'refuses to overwrite an installed migration the host has changed' do
+      File.write("#{destination_root}/db/migrate/20260101000000_create_strata_events.rb", "# edited by host\n")
+
+      expect { run_generator }.to raise_error(Rails::Generators::Error, /already named create_strata_events/)
+    end
+
+    it 'leaves a changed migration in place with --skip' do
+      changed = "#{destination_root}/db/migrate/20260101000000_create_strata_events.rb"
+      File.write(changed, "# edited by host\n")
+
+      run_generator(skip: true)
+
+      expect(migrations).to eq([ changed ])
+      expect(File.read(changed)).to eq("# edited by host\n")
+    end
+  end
+
   describe 'table existence check' do
     it 'warns when the table does not exist and the user declines to migrate' do
       allow(ActiveRecord::Base.connection).to receive(:table_exists?).with(:strata_events).and_return(false)
