@@ -130,7 +130,8 @@ unrelated case updates.
 > (dummy app migration), the `Strata::Event` and `Strata::EventDelivery`
 > models, and `rails generate strata:events` to install the migration in host
 > apps. Nothing writes to the tables yet. Events are read-only once saved,
-> like `Strata::AuditLine`, and record an optional polymorphic publisher. The `Strata::Events::PayloadType`
+> like `Strata::AuditLine`, and record an optional polymorphic publisher.
+> The `Strata::Events::PayloadType`
 > attribute type runs every payload through `Strata::Events::Payload.serialize`
 > when it is written, including payloads changed in place, so a payload that
 > breaks the contract raises `InvalidPayloadError` before it is saved. Deliveries store only the
@@ -457,7 +458,7 @@ before upgrading.
 | Per-case structured outcome log | 1 | Done |
 | Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | Done |
 | Payload serialization (`Strata::Events::Payload`) | 2 | Done |
-| Event and delivery tables and models (`Strata::Event`, `Strata::EventDelivery`) | 2 | In review |
+| Event and delivery tables and models (`Strata::Event`, `Strata::EventDelivery`) | 2 | Done |
 | Install generator (`rails generate strata:events`) | 2 | In review |
 | Publish writes event and delivery rows | 2 | Not started |
 | Durable ActiveJob delivery | 3 | Not started |

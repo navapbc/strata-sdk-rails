@@ -29,7 +29,7 @@ RSpec.describe Strata::Generators::EventsGenerator, type: :generator do
     end
 
     it "matches the dummy app's migration, so hosts get the tables the engine's models expect" do
-      dummy_migration = Dir.glob(Rails.root.join('db/migrate/*_create_strata_events.rb')).first
+      dummy_migration = Dir.glob(Rails.root.join('db/migrate/*_create_strata_events.rb')).sole
 
       expect(File.read(generated_migration)).to eq(File.read(dummy_migration))
     end
@@ -91,6 +91,16 @@ RSpec.describe Strata::Generators::EventsGenerator, type: :generator do
       generator.invoke_all
 
       expect(generator).to have_received(:say).with(/strata_events table does not exist/, :yellow)
+    end
+
+    it 'runs db:migrate when the table does not exist and the user agrees' do
+      allow(ActiveRecord::Base.connection).to receive(:table_exists?).with(:strata_events).and_return(false)
+      allow(generator).to receive(:yes?).and_return(true)
+      allow(generator).to receive(:rails_command)
+
+      generator.invoke_all
+
+      expect(generator).to have_received(:rails_command).with('db:migrate')
     end
 
     [ ActiveRecord::NoDatabaseError, ActiveRecord::ConnectionNotEstablished ].each do |error|

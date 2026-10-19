@@ -13,3 +13,5 @@ This will create:
 
 Options:
     --skip-migration-check         Skip checking if strata_events table exists
+    --force                        Replace an already installed create_strata_events migration
+    --skip                         Leave an already installed create_strata_events migration as is
