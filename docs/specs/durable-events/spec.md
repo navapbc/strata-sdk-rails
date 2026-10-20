@@ -79,6 +79,17 @@ named methods before enabling durability.
 The durable flag is read when subscriptions are registered. It must be set
 before `after_initialize` registrations run and must not be changed at runtime.
 
+> **Implemented**: `Strata::Events.durable` (default `false`) and the durable
+> subscriber registry. With durability enabled, `subscribe` registers a named
+> method under a key such as `PassportBusinessProcess.handle_event` and raises
+> `NonDurableSubscriberError` for any other callback and
+> `DuplicateSubscriberError` when a key subscribes to the same event twice.
+> `EventManager.subscriber_keys(event_key)` lists an event's keys and
+> `EventManager.subscriber(event_key, key)` returns the registered callback,
+> raising `UnknownSubscriberError` rather than loading a key by name. Setting
+> the flag while any subscription is active raises `ConfigurationError`.
+> `publish` does not use the registry yet.
+
 ## Data model
 
 ### `strata_events`
@@ -459,7 +470,8 @@ before upgrading.
 | Atomic step mutation and execution, exception propagation, and publish-boundary rescue (must land together) | 1 | Done |
 | Payload serialization (`Strata::Events::Payload`) | 2 | Done |
 | Event and delivery tables and models (`Strata::Event`, `Strata::EventDelivery`) | 2 | Done |
-| Install generator (`rails generate strata:events`) | 2 | In review |
+| Install generator (`rails generate strata:events`) | 2 | Done |
+| Durable subscriber registry and `Strata::Events.durable` | 2 | In review |
 | Publish writes event and delivery rows | 2 | Not started |
 | Durable ActiveJob delivery | 3 | Not started |
 

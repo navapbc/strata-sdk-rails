@@ -1,8 +1,11 @@
 # frozen_string_literal: true
 
 require 'rails_helper'
+require 'support/durable_events'
 
 RSpec.describe Strata::BusinessProcess do
+  include DurableEventsHelpers
+
   let(:application_form) { TestApplicationForm.new }
   let(:kase) { TestCase.find_by(application_form_id: application_form.id) }
   let(:business_process_instance) { kase.business_process_instance }
@@ -279,6 +282,36 @@ RSpec.describe Strata::BusinessProcess do
       Strata::EventManager.publish('event3', { case_id: kase.id })
       kase.reload
       expect(kase.business_process_instance.current_step).to eq('staff_task') # Should not change
+    end
+  end
+
+  describe 'durable subscriptions' do
+    let(:event_names) { %w[TestApplicationFormCreated event1 event2 event3 event4 event5 event6] }
+
+    around do |example|
+      with_durable_events { example.run }
+    end
+
+    it 'registers its event handler as a durable subscriber of every event it listens for' do
+      event_names.each do |event_name|
+        expect(Strata::EventManager.subscriber_keys(event_name)).to eq([ 'TestBusinessProcess.handle_event' ])
+      end
+    end
+
+    it 'removes its durable subscriptions when it stops listening' do
+      business_process.stop_listening_for_events
+
+      event_names.each do |event_name|
+        expect(Strata::EventManager.subscriber_keys(event_name)).to eq([])
+      end
+    end
+
+    it 'still moves a case in process when an event is published' do
+      application_form.save!
+
+      Strata::EventManager.publish('event1', { case_id: kase.id })
+
+      expect(kase.reload.business_process_instance.current_step).to eq('staff_task_2')
     end
   end
 end

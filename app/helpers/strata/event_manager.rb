@@ -19,27 +19,43 @@ module Strata
   #
   class EventManager
     @@subscriptions = []
+    @@durable_subscribers = Strata::Events::SubscriberRegistry.new
 
     class << self
       # Subscribes to an event, registering a callback to be executed when the event occurs.
       #
+      # When {Strata::Events.durable} is enabled, the callback must be a method on a named
+      # class or module, such as +MyBusinessProcess.method(:handle_event)+, and is registered
+      # as a durable subscriber under a key such as "MyBusinessProcess.handle_event".
+      #
       # @param [String] event_key The name of the event to subscribe to
       # @param [Proc, Method] callback The callback to execute when the event occurs
       # @return [Object] The subscription object, which can be used to unsubscribe
+      # @raise [Strata::Events::NonDurableSubscriberError] if durable and the callback is not a named method
+      # @raise [Strata::Events::DuplicateSubscriberError] if durable and the callback already subscribes to the event
       def subscribe(event_key, callback)
-        subscription = ActiveSupport::Notifications.subscribe(event_key) do |name, _started, _finished, _unique_id, payload|
-          call_subscriber(callback, { name: name, payload: payload })
-        end
+        subscription =
+          if Strata::Events.durable
+            @@durable_subscribers.register(event_key, callback) { listen(event_key, callback) }
+          else
+            listen(event_key, callback)
+          end
 
         @@subscriptions << subscription
+        Strata::Events.active_subscriptions = @@subscriptions.size
         subscription
       end
 
       # Unsubscribes from an event by providing the subscription object.
+      # Unsubscribing a subscription that was already removed does nothing.
       #
       # @param [Object] subscription The subscription object returned by subscribe
       def unsubscribe(subscription)
         ActiveSupport::Notifications.unsubscribe(subscription)
+        return unless @@subscriptions.delete(subscription)
+
+        @@durable_subscribers.remove(subscription)
+        Strata::Events.active_subscriptions = @@subscriptions.size
       end
 
       # Unsubscribes from all events that have been registered.
@@ -51,6 +67,27 @@ module Strata
           ActiveSupport::Notifications.unsubscribe(subscription)
         end
         @@subscriptions.clear
+        @@durable_subscribers.clear
+        Strata::Events.active_subscriptions = 0
+      end
+
+      # Returns the keys of the durable subscribers of an event, in subscription order.
+      #
+      # @param [String] event_key The name of the event
+      # @return [Array<String>] subscriber keys, such as "MyBusinessProcess.handle_event"
+      def subscriber_keys(event_key)
+        @@durable_subscribers.keys(event_key)
+      end
+
+      # Returns the callback registered for a durable subscriber of an event. Only registered
+      # subscribers are returned; a subscriber key is never resolved by loading it by name.
+      #
+      # @param [String] event_key The name of the event
+      # @param [String] subscriber_key The subscriber key, such as "MyBusinessProcess.handle_event"
+      # @return [Method] the registered callback
+      # @raise [Strata::Events::UnknownSubscriberError] if the subscriber is not registered for the event
+      def subscriber(event_key, subscriber_key)
+        @@durable_subscribers.fetch(event_key, subscriber_key)
       end
 
       # Publishes an event with the given key and payload.
@@ -79,10 +116,14 @@ module Strata
         Rails.error.report(e, handled: true, severity: :error, context: { event: event[:name], subscriber: subscriber })
       end
 
-      def subscriber_name(callback)
-        return "#{callback.receiver.name}.#{callback.name}" if callback.is_a?(Method) && callback.receiver.is_a?(Module)
+      def listen(event_key, callback)
+        ActiveSupport::Notifications.subscribe(event_key) do |name, _started, _finished, _unique_id, payload|
+          call_subscriber(callback, { name: name, payload: payload })
+        end
+      end
 
-        callback.class.name
+      def subscriber_name(callback)
+        Strata::Events::SubscriberRegistry.subscriber_key(callback) || callback.class.name
       end
     end
 
